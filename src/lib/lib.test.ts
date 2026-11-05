@@ -5,6 +5,9 @@ import { isSuperAdmin, isTeam, roleOf, tabsFor } from './roles'
 import {
   checkDecision,
   checkNote,
+  checkText,
+  clean,
+  lettersOrDigits,
   checkStrikeReason,
   checkTestPhone,
   decisionsFor,
@@ -112,29 +115,45 @@ describe('decisions and form checks', () => {
     expect(reasonFromChecklist([])).toBe('')
   })
 
-  it('checks a reason of 2–200 letters (trimmed) only where one is needed, and a note up to 500', () => {
-    expect(checkDecision('reject', ' a ', '').reason).toMatch(/at least 2/)
+  it('checks a reason of 2–200 (cleaned) only where one is needed, and a note of 2–500 only when given', () => {
+    expect(checkDecision('reject', '   ', '').reason).toBe('Write a reason for the owner')
+    expect(checkDecision('reject', ' a ', '').reason).toBe('Write at least 2 letters or digits')
     expect(checkDecision('suspend', 'ok', '')).toEqual({})
     expect(checkDecision('suspend', 'x'.repeat(200), '')).toEqual({})
-    expect(checkDecision('suspend', 'x'.repeat(201), '').reason).toMatch(/under 200 letters \(now 201\)/)
+    expect(checkDecision('suspend', 'x'.repeat(201), '').reason).toBe('Keep it under 200 characters (now 201)')
+    // Spaces are collapsed before counting, as the backend does
+    expect(checkDecision('suspend', `a${' '.repeat(300)}b`, '')).toEqual({})
     expect(checkDecision('approve', '', '')).toEqual({})
     expect(checkDecision('approve', '', 'x'.repeat(500))).toEqual({})
     expect(checkDecision('reinstate', '', 'x'.repeat(501)).note).toMatch(/now 501/)
+    expect(checkDecision('approve', '', '.').note).toBe('Write at least 2 letters or digits')
+  })
+
+  it('needs at least 2 letters or digits in any script, not just symbols', () => {
+    expect(lettersOrDigits('!! ?? ..')).toBe(0)
+    expect(lettersOrDigits('ठीक है')).toBeGreaterThanOrEqual(2)
+    expect(checkText('!!', 200, 'empty')).toBe('Write at least 2 letters or digits')
+    expect(checkText('a!', 200, 'empty')).toBe('Write at least 2 letters or digits')
+    expect(checkText('१२', 200, 'empty')).toBeUndefined()
+    expect(checkText('  ', 200, 'empty')).toBe('empty')
+    expect(clean('  Shop   was\n shut ')).toBe('Shop was shut')
   })
 
   it('checks a note on its own, a strike reason, a test number and the hours', () => {
     expect(checkNote('  ')).toBe('Write the note')
     expect(checkNote('ok')).toBeUndefined()
+    expect(checkNote('x')).toBe('Write at least 2 letters or digits')
     expect(checkNote('x'.repeat(501))).toMatch(/under 500/)
-    expect(checkStrikeReason('x')).toMatch(/at least 2/)
+    expect(checkStrikeReason('x')).toBe('Write at least 2 letters or digits')
     expect(checkStrikeReason('Salon mistake')).toBeUndefined()
     expect(checkStrikeReason('x'.repeat(201))).toMatch(/under 200/)
     expect(checkTestPhone('12345', '')).toEqual({ phone: 'Enter a 10-digit Indian mobile number', label: 'Say whose number this is' })
     expect(checkTestPhone('+91 90000 00088', 'QA')).toEqual({})
+    expect(checkTestPhone('9000000088', 'Q').label).toBe('Write at least 2 letters or digits')
     expect(checkTestPhone('9000000088', 'x'.repeat(61)).label).toMatch(/under 60/)
     expect([0, 1, 8, 9, 2.5].map(validHours)).toEqual([false, true, true, false, false])
     expect(optional('  ')).toBeUndefined()
-    expect(optional(' hi ')).toBe('hi')
+    expect(optional(' hi   there ')).toBe('hi there')
   })
 })
 

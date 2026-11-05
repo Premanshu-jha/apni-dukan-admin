@@ -1,15 +1,31 @@
-import { ADMIN_MESSAGES, ApiError, explain, fieldError } from './errors'
+import { ADMIN_MESSAGES, ApiError, explain, fieldError, isNetwork, phoneError, wrongStatusText } from './errors'
 
 const err = (status: number, code: string, message = 'backend words', details: Record<string, unknown> = {}) =>
   new ApiError(status, { code, message, details })
 
 describe('error explanations', () => {
   it('uses the agreed words for every admin refusal in the contract', () => {
-    expect(explain(err(409, 'SHOP_CHANGED'))).toBe('The owner changed something; reload and check again')
-    for (const code of ['WRONG_STATUS', 'ALREADY_ADMIN', 'TEST_PHONE', 'CANT_REMOVE_SUPER_ADMIN', 'ADMIN_PHONE', 'ALREADY_TEST_PHONE', 'CUSTOMER_NOT_FOUND', 'SUPER_ADMIN_ONLY']) {
+    expect(explain(err(409, 'SHOP_CHANGED'))).toBe('This shop changed since you opened it (the owner or another admin). Reload and check again.')
+    expect(explain(err(409, 'REAL_ACCOUNT'))).toBe('That number already has a real account (a customer or a shop). Use a number nobody has signed in with.')
+    expect(explain(err(409, 'TEST_PHONE'))).toBe("This is a test number, or an account made in test mode, so it can't be an admin.")
+    for (const code of ['ALREADY_ADMIN', 'TEST_PHONE', 'CANT_REMOVE_SUPER_ADMIN', 'ADMIN_PHONE', 'REAL_ACCOUNT', 'ALREADY_TEST_PHONE', 'CUSTOMER_NOT_FOUND', 'STRIKE_NOT_FOUND', 'INVALID_PHONE', 'SUPER_ADMIN_ONLY']) {
       expect(explain(err(409, code))).toBe(ADMIN_MESSAGES[code])
       expect(ADMIN_MESSAGES[code].length).toBeGreaterThan(10)
     }
+  })
+
+  it('says what the shop is now on WRONG_STATUS (details.status)', () => {
+    expect(wrongStatusText(err(409, 'WRONG_STATUS', 'x', { status: 'APPROVED' }))).toBe('Someone else decided meanwhile: it is now Live.')
+    expect(explain(err(409, 'WRONG_STATUS', 'x', { status: 'DRAFT' }))).toBe('Someone else decided meanwhile: it is now Sent back to the owner.')
+    expect(explain(err(409, 'WRONG_STATUS'))).toBe('Someone else decided meanwhile.')
+  })
+
+  it('puts INVALID_PHONE (no details) on the phone field, and knows a network failure', () => {
+    expect(phoneError(err(400, 'INVALID_PHONE'))).toBe("That isn't a valid mobile number. Check the 10 digits.")
+    expect(phoneError(err(400, 'VALIDATION_FAILED', 'x', { phone: 'is wrong' }))).toBe('is wrong')
+    expect(phoneError(err(409, 'ALREADY_ADMIN'))).toBeUndefined()
+    expect(isNetwork(ApiError.network())).toBe(true)
+    expect(isNetwork(err(503, 'SERVICE_BUSY'))).toBe(false)
   })
 
   it('spells out field reasons for VALIDATION_FAILED', () => {

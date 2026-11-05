@@ -6,6 +6,8 @@ import type { BrowserContext, Route } from '@playwright/test'
  * per test. Where the contract leaves something open, the choice is written next to it and listed in the README.
  */
 export const API = 'http://api.test'
+/** Photo links are https, like the real signed links (the site's CSP allows images from https only). */
+export const PHOTOS = 'https://photos.test'
 const P = '/api/v1'
 
 export type AdminRole = 'NONE' | 'ADMIN' | 'SUPER_ADMIN'
@@ -41,7 +43,19 @@ export interface ShopExtra {
   timeline: Json[]
 }
 
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+
+/** The backend's text rule: cleaned (trimmed, spaces collapsed), within the limits, at least 2 letters or digits. */
+export function textProblem(value: unknown, min: number, max: number): string | null {
+  const t = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
+  if (t.length < min || t.length > max) return `must be ${min} to ${max} characters`
+  if ((t.match(/[\p{L}\p{N}]/gu) ?? []).length < 2) return 'must have at least 2 letters or digits'
+  return null
+}
+
+const PHONE = /^[6-9]\d{9}$/
 
 export class MockApi {
   user: MockUser = MockApi.completeUser('ADMIN')
@@ -58,6 +72,14 @@ export class MockApi {
   offline = false
   /** Answer requests whose path ends with this after a wait (ms), to see loading states. */
   slow = new Map<string, number>()
+  /** The next call to a path (by suffix) is carried out, but its answer is lost on the way back (a weak network). */
+  loseAnswer = new Set<string>()
+  /** Numbers that already have a real account (a customer or a shop): they can't become test numbers. */
+  realAccounts = new Set<string>(['9811122233'])
+  /** Accounts made in test mode: they can't become admins. */
+  testAccounts = new Set<string>()
+  /** This person signed in as a test account: when test mode ends their refresh answers 401 TEST_MODE_OFF. */
+  signedInAsTestAccount = false
   /** Next answer of a path (by suffix): a code + status, once. */
   failOnce = new Map<string, { status: number; code: string; message: string; details?: Json }>()
   private n = 0
@@ -106,8 +128,8 @@ export class MockApi {
       type: 'KIRANA',
       status: 'PENDING_VISIT',
       statusReason: null,
-      ownerPhotoUrl: `${API}/photos/owner-${i}.png`,
-      shopPhotoUrl: `${API}/photos/shop-${i}.png`,
+      ownerPhotoUrl: `${PHOTOS}/owner-${i}.png`,
+      shopPhotoUrl: `${PHOTOS}/shop-${i}.png`,
       version: 3,
       createdAt: '2026-11-01T04:30:00Z',
       ownerPhone: '9811122233',
@@ -154,7 +176,24 @@ export class MockApi {
   }
 
   private view(shop: Json): Json {
-    return { ...shop, group: this.groupOf(shop) }
+    return { ...shop, group: this.groupOf(shop), statusSince: this.extra.get(shop.id as string)!.statusSince }
+  }
+
+  /**
+   * Taken off the team as the backend really does it: the access token stops working (401), the refresh then
+   * succeeds with adminRole NONE, and /admin/me answers 403 to the new token. With `redisDown` the old access token
+   * keeps working (the revocation list can't be read), so /admin/me answers 404 NOT_FOUND instead.
+   */
+  removeFromTeam(opts: { redisDown?: boolean } = {}) {
+    this.setRole('NONE')
+    if (!opts.redisDown) this.expireAccess()
+  }
+
+  /** A status change made elsewhere (another admin): the version moves on with it, as on the backend. */
+  setStatus(id: string, status: Status, reason: string | null = null) {
+    const shop = this.shops.find((s) => s.id === id)!
+    Object.assign(shop, { status, statusReason: reason, version: (shop.version as number) + 1 })
+    this.extra.get(id)!.statusSince = new Date().toISOString()
   }
 
   private tokens() {
@@ -189,6 +228,10 @@ export class MockApi {
   }
 
   async attach(context: BrowserContext) {
+    await context.route(`${PHOTOS}/**`, (route) =>
+      // A 1×1 PNG, so photos load without the internet.
+      route.fulfill({ status: 200, headers: { 'Content-Type': 'image/png' }, body: Buffer.from(PNG, 'base64') }),
+    )
     await context.route(`${API}/**`, async (route) => {
       if (this.offline) return route.abort('internetdisconnected')
       try {
@@ -217,19 +260,18 @@ export class MockApi {
     const url = new URL(req.url())
     const method = req.method()
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: this.cors() })
-    if (url.pathname.startsWith('/photos/')) {
-      // A 1×1 PNG, so photos load without the internet.
-      const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
-      return route.fulfill({ status: 200, headers: { 'Content-Type': 'image/png' }, body: png })
-    }
     const raw = req.postData()
     const body = raw ? JSON.parse(raw) : undefined
     const auth = req.headers()['authorization'] ?? null
     this.calls.push({ method, path: url.pathname + url.search, body, auth })
     const p = url.pathname.replace(P, '')
     for (const [suffix, ms] of this.slow) if (p.endsWith(suffix)) await new Promise((r) => setTimeout(r, ms))
+    const lost = [...this.loseAnswer].find((suffix) => p.endsWith(suffix))
+    if (lost) this.loseAnswer.delete(lost)
     const ok = (status: number, json?: unknown) =>
-      route.fulfill({ status, headers: { ...this.cors(), 'Content-Type': 'application/json' }, body: json === undefined ? '' : JSON.stringify(json) })
+      lost
+        ? route.abort('timedout')
+        : route.fulfill({ status, headers: { ...this.cors(), 'Content-Type': 'application/json' }, body: json === undefined ? '' : JSON.stringify(json) })
     const fail = (status: number, code: string, message: string, details: Json = {}) => ok(status, { code, message, details })
     const invalid = (details: Json) => fail(400, 'VALIDATION_FAILED', 'Some fields are not valid', details)
 
@@ -246,6 +288,7 @@ export class MockApi {
       const state = this.refreshTokens.get(body.refreshToken)
       if (state === 'rotated') return fail(401, 'REFRESH_TOKEN_REUSED', 'For your safety you were signed out everywhere. Sign in again.')
       if (state !== 'live') return fail(401, 'INVALID_REFRESH_TOKEN', 'Sign in again.')
+      if (this.signedInAsTestAccount && !this.testModeOn()) return fail(401, 'TEST_MODE_OFF', 'Test mode is off. Sign in again.')
       this.refreshTokens.set(body.refreshToken, 'rotated')
       return ok(200, this.tokens())
     }
@@ -317,12 +360,16 @@ export class MockApi {
       if (!['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED'].includes(group ?? '')) details.group = 'is required'
       if (Object.keys(details).length) return invalid(details)
       const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+      // Shop number exactly ("1042" or "#1042"); owner phone in part (spaces, "+91", dashes ignored); name or owner name.
+      const number = q.replace(/^#/, '')
+      const digits = q.replace(/^\+91/, '').replace(/[\s-]/g, '')
       const list = this.shops
         .filter((s) => s.type === type && this.groupOf(s) === group)
         .filter((s) => {
           if (!q) return true
-          if (/^\d+$/.test(q) && String(s.shopCode) === q) return true
-          return [s.name, s.ownerName, s.ownerPhone].some((v) => typeof v === 'string' && v.toLowerCase().includes(q))
+          if (/^\d+$/.test(number) && String(s.shopCode) === number) return true
+          if (/^\d+$/.test(digits) && typeof s.ownerPhone === 'string' && s.ownerPhone.includes(digits)) return true
+          return [s.name, s.ownerName].some((v) => typeof v === 'string' && v.toLowerCase().includes(q))
         })
         .sort((a, b) => Date.parse(this.extra.get(a.id as string)!.statusSince) - Date.parse(this.extra.get(b.id as string)!.statusSince))
         .slice(0, 100)
@@ -346,22 +393,25 @@ export class MockApi {
           timeline: x.timeline,
         })
       }
-      const note = typeof body?.note === 'string' ? body.note.trim() : ''
+      const note = typeof body?.note === 'string' ? body.note.trim().replace(/\s+/g, ' ') : ''
       if (action === 'notes' && method === 'POST') {
-        if (!note) return invalid({ note: 'must not be blank' })
-        if (note.length > 500) return invalid({ note: 'must be at most 500 characters' })
+        const problem = textProblem(body.note, 2, 500)
+        if (problem) return invalid({ note: problem })
         const entry = { at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, note, checklist: [] }
         x.timeline.unshift(entry)
         return ok(201, entry)
       }
       if (action && method === 'POST') {
         // Order of checks (the contract doesn't fix it): fields first, then the status, then the version.
-        const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+        const reason = typeof body.reason === 'string' ? body.reason.trim().replace(/\s+/g, ' ') : ''
         const needsReason = action === 'reject' || action === 'suspend'
         const details: Json = {}
         if (typeof body.version !== 'number') details.version = 'is required'
-        if (needsReason && (reason.length < 2 || reason.length > 200)) details.reason = 'must be 2 to 200 characters'
-        if (note.length > 500) details.note = 'must be at most 500 characters'
+        const reasonProblem = needsReason ? textProblem(body.reason, 2, 200) : null
+        if (reasonProblem) details.reason = reasonProblem
+        // A note is optional: empty means none; given, it follows the text rule (2–500).
+        const noteProblem = note ? textProblem(note, 2, 500) : null
+        if (noteProblem) details.note = noteProblem
         if (Object.keys(details).length) return invalid(details)
         const from: Record<string, Status[]> = {
           approve: ['PENDING_VISIT'],
@@ -369,7 +419,9 @@ export class MockApi {
           suspend: ['APPROVED', 'PENDING_VISIT'],
           reinstate: ['SUSPENDED'],
         }
-        if (!from[action].includes(shop.status as Status)) return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`)
+        if (!from[action].includes(shop.status as Status)) {
+          return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
+        }
         if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop was changed. Reload and check again.')
         const to: Record<string, Status> = { approve: 'APPROVED', reject: 'DRAFT', suspend: 'SUSPENDED', reinstate: 'PENDING_VISIT' }
         const event: Record<string, string> = { approve: 'APPROVED', reject: 'SENT_BACK', suspend: 'SUSPENDED', reinstate: 'REINSTATED' }
@@ -400,13 +452,15 @@ export class MockApi {
 
     // ---------- support ----------
     if (p === '/admin/salon/strikes/lookup' && method === 'POST') {
+      if (!PHONE.test(body.phone ?? '')) return fail(400, 'INVALID_PHONE', 'That is not a valid mobile number.')
       const c = this.customers.get(body.phone)
       if (!c) return fail(404, 'CUSTOMER_NOT_FOUND', 'No customer with this number.')
       return ok(200, c)
     }
     const strike = p.match(/^\/admin\/salon\/strikes\/([^/]+)\/remove$/)
     if (strike && method === 'POST') {
-      if (typeof body.reason !== 'string' || body.reason.trim().length < 2) return invalid({ reason: 'must not be blank' })
+      const problem = textProblem(body.reason, 2, 200)
+      if (problem) return invalid({ reason: problem })
       for (const c of this.customers.values()) {
         const before = c.strikes.length
         c.strikes = c.strikes.filter((s) => s.appointmentId !== strike[1])
@@ -415,7 +469,7 @@ export class MockApi {
           return ok(204)
         }
       }
-      return fail(404, 'NOT_FOUND', 'No such strike.')
+      return fail(404, 'STRIKE_NOT_FOUND', 'This strike was already removed.')
     }
 
     // ---------- super admin only ----------
@@ -425,9 +479,11 @@ export class MockApi {
     }
     if (p === '/admin/team' && method === 'POST') {
       if (!isSuper) return superOnly()
-      if (!/^[6-9]\d{9}$/.test(body.phone ?? '')) return invalid({ phone: 'must be a 10-digit Indian mobile number' })
+      if (!PHONE.test(body.phone ?? '')) return fail(400, 'INVALID_PHONE', 'That is not a valid mobile number.')
       if (this.team.some((m) => m.phone === body.phone)) return fail(409, 'ALREADY_ADMIN', 'This number is already an admin.')
-      if (this.testPhones.some((t) => t.phone === body.phone)) return fail(409, 'TEST_PHONE', "A test number can't be an admin.")
+      if (this.testPhones.some((t) => t.phone === body.phone) || this.testAccounts.has(body.phone)) {
+        return fail(409, 'TEST_PHONE', "A test number, or an account made in test mode, can't be an admin.")
+      }
       const m = { userId: `u${++this.n}`, name: null, phone: body.phone, adminRole: 'ADMIN', since: new Date().toISOString() }
       this.team.push(m)
       return ok(201, m)
@@ -457,12 +513,14 @@ export class MockApi {
     if (p === '/admin/test-mode/phones' && method === 'POST') {
       if (!isSuper) return superOnly()
       const details: Json = {}
-      if (!/^[6-9]\d{9}$/.test(body.phone ?? '')) details.phone = 'must be a 10-digit Indian mobile number'
-      if (typeof body.label !== 'string' || !body.label.trim()) details.label = 'must not be blank'
+      if (!PHONE.test(body.phone ?? '')) return fail(400, 'INVALID_PHONE', 'That is not a valid mobile number.')
+      const labelProblem = textProblem(body.label, 2, 60)
+      if (labelProblem) details.label = labelProblem
       if (Object.keys(details).length) return invalid(details)
       if (this.team.some((m) => m.phone === body.phone)) return fail(409, 'ADMIN_PHONE', "An admin's number can't be a test number.")
+      if (this.realAccounts.has(body.phone)) return fail(409, 'REAL_ACCOUNT', 'This number already has a real account.')
       if (this.testPhones.some((t) => t.phone === body.phone)) return fail(409, 'ALREADY_TEST_PHONE', 'Already a test number.')
-      this.testPhones.push({ phone: body.phone, label: body.label.trim(), addedAt: new Date().toISOString(), hasAccount: false })
+      this.testPhones.push({ phone: body.phone, label: body.label.trim().replace(/\s+/g, ' '), addedAt: new Date().toISOString(), hasAccount: false })
       return ok(201, this.testState())
     }
     const testPhone = p.match(/^\/admin\/test-mode\/phones\/([^/]+)$/)

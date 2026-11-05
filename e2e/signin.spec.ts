@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { MockApi } from './mockApi'
 import { atDashboard, expect, signedIn, test } from './helpers'
 
@@ -13,7 +14,9 @@ test('an admin signs in with phone and code and lands on the dashboard', async (
   await expect(page.getByRole('heading', { name: 'Enter the code' })).toBeVisible()
   await page.getByLabel('Code').fill('111111')
   await expect(page.getByText('That code is not right. 4 tries left.')).toBeVisible()
-  await page.getByLabel('Code').fill('123456')
+  // The wrong code is really cleared, so the next one is typed into an empty box
+  await expect(page.getByLabel('Code')).toHaveValue('')
+  await page.getByLabel('Code').pressSequentially('123456')
   await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
   expect(api.calls.find((c) => c.path === '/api/v1/auth/otp/send')?.body).toMatchObject({ phone: '9848012345' })
   expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(0)
@@ -82,11 +85,37 @@ test('recovery with email: codes to the email and the new number, then in', asyn
   expect(api.calls.find((c) => c.path === '/api/v1/auth/recover/complete')?.body).toMatchObject({ email: 'asha@example.com', newPhone: '9848012345' })
 })
 
-test('an admin taken off the team meanwhile sees "not for the team" (404 NOT_FOUND on /admin/me)', async ({ page, context, api }) => {
+test('taken off the team: the old token gets 401, the refresh says NONE, /admin/me answers 403; the screen follows', async ({ page, context, api }) => {
   await atDashboard(page, context, api)
-  api.setRole('NONE')
-  await page.reload()
+  api.removeFromTeam()
+  await page.getByRole('link', { name: 'Support' }).click()
+  await page.getByLabel("Customer's mobile number").fill('9811122233')
+  await page.getByRole('button', { name: 'Look up' }).click()
   await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  const saved = JSON.parse((await page.evaluate(() => localStorage.getItem('ada.session')))!)
+  expect(saved.user.adminRole).toBe('NONE')
+})
+
+test('an open session whose next /admin/me answers 404 (revocation list down) moves to "not for the team" by itself', async ({ page, context, api }) => {
+  await page.clock.install()
+  await atDashboard(page, context, api)
+  api.removeFromTeam({ redisDown: true })
+  // No reload, no click: /admin/me is re-read every minute
+  await page.clock.runFor(61_000)
+  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  expect(api.calls.filter((c) => c.path === '/api/v1/admin/me').length).toBeGreaterThanOrEqual(2)
+})
+
+test('a test account is signed out when test mode ends (refresh 401 TEST_MODE_OFF)', async ({ page, context, api }) => {
+  api.testMode = { on: true, until: new Date(Date.now() + 3600_000).toISOString(), turnedOnByName: 'Meera Super' }
+  api.signedInAsTestAccount = true
+  await signedIn(context, api, 'NONE')
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  api.testMode = { on: false, until: null, turnedOnByName: null }
+  await page.getByRole('button', { name: 'Check again' }).click()
+  await expect(page).toHaveURL(/\/signin$/)
+  expect(await page.evaluate(() => localStorage.getItem('ada.session'))).toBeNull()
 })
 
 test('an expired session refreshes once and carries on, in two tabs too', async ({ page, context, api }) => {
@@ -104,28 +133,69 @@ test('an expired session refreshes once and carries on, in two tabs too', async 
   expect(new Set(sent).size).toBe(sent.length)
 })
 
-test('a refused refresh signs out to the sign-in screen', async ({ page, context, api }) => {
+test("a refused refresh signs out, and the next sign-in sees none of the old data", async ({ page, context, api }) => {
+  api.addShop({ name: 'Gupta General Store' })
   await atDashboard(page, context, api)
+  await page.getByRole('link', { name: 'Waiting for first visit: 1' }).click()
+  await expect(page.getByText('Gupta General Store')).toBeVisible()
   api.expireAccess()
   api.refreshTokens.clear()
-  await page.getByRole('link', { name: /Live/ }).click()
+  await page.getByRole('button', { name: 'Back' }).click()
+  await page.getByRole('link', { name: /Re-check after edit/ }).click()
   await expect(page).toHaveURL(/\/signin$/)
+  await signInAgainWithListFailing(page, api)
 })
 
-test('More shows the name, phone and role, and signs out', async ({ page, context, api }) => {
+test('More shows the name, phone and role; sign-out is immediate (even on a slow network) and leaves no cached data', async ({ page, context, api }) => {
+  api.addShop({ name: 'Gupta General Store' })
   await atDashboard(page, context, api)
+  await page.getByRole('link', { name: 'Waiting for first visit: 1' }).click()
+  await expect(page.getByText('Gupta General Store')).toBeVisible()
+  api.slow.set('/auth/logout', 10_000)
   await page.getByRole('link', { name: 'More' }).click()
   await expect(page.getByText('Asha Field')).toBeVisible()
   await expect(page.getByText('+91 98480 12345')).toBeVisible()
   await expect(page.getByText('Admin', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Sign out' }).click()
-  await expect(page).toHaveURL(/\/signin$/)
-  expect(api.calledTimes('POST', '/api/v1/auth/logout')).toBe(1)
+  // At once: not after the 10 s logout call
+  await expect(page).toHaveURL(/\/signin$/, { timeout: 2000 })
   expect(await page.evaluate(() => localStorage.getItem('ada.session'))).toBeNull()
+  await expect.poll(() => api.calledTimes('POST', '/api/v1/auth/logout')).toBe(1)
+  await signInAgainWithListFailing(page, api)
 })
+
+/**
+ * Signs in again in the same tab and opens the list the previous session had loaded, with the backend refusing it:
+ * cached data would still show the old shop (with a "couldn't refresh" note); a cleared cache shows only the error.
+ */
+async function signInAgainWithListFailing(page: Page, api: MockApi) {
+  await page.getByLabel('Mobile number').fill('9848012345')
+  await page.getByRole('button', { name: 'Send code' }).click()
+  await page.getByLabel('Code').fill('123456')
+  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  api.failOnce.set('/admin/shops', { status: 400, code: 'BAD', message: 'The list could not be read.' })
+  await page.getByRole('link', { name: /Waiting for first visit/ }).click()
+  await expect(page.getByText('The list could not be read.')).toBeVisible()
+  await expect(page.getByText('Gupta General Store')).toBeHidden()
+}
 
 test('a page that does not exist says so', async ({ page, context, api }) => {
   await atDashboard(page, context, api)
   await page.goto('/nowhere')
   await expect(page.getByText('Page not found')).toBeVisible()
+})
+
+test('a shop link opened while signed out is kept by the guard and opened after sign-in', async ({ page, api }) => {
+  const shop = api.addShop({ name: 'Gupta General Store' })
+  api.user = MockApi.completeUser('ADMIN')
+  api.setRole('ADMIN')
+  await page.goto(`/shops/${shop.id}`)
+  await expect(page).toHaveURL(/\/signin$/)
+  expect(await page.evaluate(() => localStorage.getItem('ada.returnTo'))).toBe(`/shops/${shop.id}`)
+  await page.getByLabel('Mobile number').fill('9848012345')
+  await page.getByRole('button', { name: 'Send code' }).click()
+  await page.getByLabel('Code').fill('123456')
+  await expect(page).toHaveURL(new RegExp(`/shops/${shop.id}$`))
+  await expect(page.getByRole('heading', { name: /Gupta General Store/ })).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('ada.returnTo'))).toBeNull()
 })

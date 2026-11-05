@@ -22,6 +22,19 @@ test('a super admin made an ordinary admin meanwhile is sent out of Team (403 SU
   await expect(page.getByRole('link', { name: 'Team' })).toBeHidden()
 })
 
+test('a write refused with 403 SUPER_ADMIN_ONLY re-reads /admin/me at once and the guard moves them out', async ({ page, context, api }) => {
+  await signedIn(context, api, 'SUPER_ADMIN')
+  await page.goto('/team')
+  await expect(page.getByText('Asha Field (you)')).toBeVisible()
+  api.setRole('ADMIN')
+  const meBefore = api.calledTimes('GET', '/api/v1/admin/me')
+  await page.getByLabel('Add an admin by mobile number').fill('9000000055')
+  await page.getByRole('button', { name: 'Add to the team' }).click()
+  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(meBefore)
+  await expect(page.getByRole('link', { name: 'Team' })).toBeHidden()
+})
+
 test('team: list with the super admin first, add an admin, the refusals in words, remove with a confirm', async ({ page, context, api }) => {
   api.team.push({ userId: 'u7', name: 'Kiran Field', phone: '9000000007', adminRole: 'ADMIN', since: '2026-10-05T05:00:00Z' })
   api.testPhones.push({ phone: '9000000099', label: 'Play review', addedAt: '2026-11-01T05:00:00Z', hasAccount: true })
@@ -30,6 +43,8 @@ test('team: list with the super admin first, add an admin, the refusals in words
   const team = page.getByRole('list', { name: 'Team' }).getByRole('listitem')
   await expect(team.first()).toContainText('Asha Field (you)')
   await expect(team.first()).toContainText('Super admin')
+  // since = when they became an admin
+  await expect(team.nth(1)).toContainText('admin since 5 Oct 2026')
   await expect(team.first().getByRole('button', { name: /Remove/ })).toBeHidden()
 
   const phone = page.getByLabel('Add an admin by mobile number')
@@ -38,16 +53,21 @@ test('team: list with the super admin first, add an admin, the refusals in words
   await expect(page.getByText('This number is already on the team.')).toBeVisible()
   await phone.fill('9000000099')
   await page.getByRole('button', { name: 'Add to the team' }).click()
-  await expect(page.getByText("This is a test number, and a test number can't be an admin. Remove it in Test mode first.")).toBeVisible()
+  await expect(page.getByText("This is a test number, or an account made in test mode, so it can't be an admin.")).toBeVisible()
+  // An account made in test mode can't be an admin either
+  api.testAccounts.add('9000000066')
+  await phone.fill('9000000066')
+  await page.getByRole('button', { name: 'Add to the team' }).click()
+  await expect(page.getByText("This is a test number, or an account made in test mode, so it can't be an admin.")).toBeVisible()
+  // The backend's own phone check shows on the field
+  api.failOnce.set('/admin/team', { status: 400, code: 'INVALID_PHONE', message: 'Not a valid number.' })
+  await page.getByRole('button', { name: 'Add to the team' }).click()
+  await expect(page.locator('#member-phone-error')).toHaveText("That isn't a valid mobile number. Check the 10 digits.")
   await phone.fill('90000 00055')
   await page.getByRole('button', { name: 'Add to the team' }).click()
   await expect(page.getByText('+91 90000 00055 is an admin now.')).toBeVisible()
   await expect(team).toHaveCount(3)
-  expect(api.calls.filter((c) => c.method === 'POST' && c.path === '/api/v1/admin/team').map((c) => c.body)).toEqual([
-    { phone: '9000000007' },
-    { phone: '9000000099' },
-    { phone: '9000000055' },
-  ])
+  expect(api.calls.filter((c) => c.method === 'POST' && c.path === '/api/v1/admin/team').at(-1)?.body).toEqual({ phone: '9000000055' })
 
   await page.getByRole('button', { name: 'Remove Kiran Field' }).click()
   const sheet = page.getByRole('dialog', { name: 'Remove Kiran Field?' })
@@ -73,7 +93,14 @@ test('team: removing someone who became the super admin meanwhile is refused (40
 test('test mode: switch on for 1–8 hours, the red banner appears everywhere, then off and it goes', async ({ page, context, api }) => {
   await signedIn(context, api, 'SUPER_ADMIN')
   await page.goto('/test-mode')
-  await expect(page.getByText(/signs in with any 6-digit code/)).toBeVisible()
+  for (const line of [
+    'Only numbers nobody has signed in with can be added as test numbers.',
+    /While test mode is on, a test number signs in with any 6-digit code \(no SMS is sent\)/,
+    'Email codes are always real, for test numbers too.',
+    'Test accounts are signed out when test mode ends or is switched off, or when their number is removed.',
+  ]) {
+    await expect(page.getByText(line)).toBeVisible()
+  }
   await expect(page.getByText('Off', { exact: true })).toBeVisible()
   await expect(page.getByRole('alert').filter({ hasText: 'OTP test mode is on' })).toBeHidden()
   await expect(page.getByLabel('Switch on for').locator('option')).toHaveCount(8)
@@ -114,6 +141,15 @@ test('test numbers: add with a label, the refusals in words, remove', async ({ p
   await page.getByLabel('Test number', { exact: true }).fill('9000000099')
   await page.getByRole('button', { name: 'Add test number' }).click()
   await expect(page.getByText('This number is already a test number.')).toBeVisible()
+  // A number with a real account (a customer or a shop)
+  await page.getByLabel('Test number', { exact: true }).fill('9811122233')
+  await page.getByRole('button', { name: 'Add test number' }).click()
+  await expect(page.getByText('That number already has a real account (a customer or a shop). Use a number nobody has signed in with.')).toBeVisible()
+  // The label follows the text rule
+  await page.getByLabel('Test number', { exact: true }).fill('9000000088')
+  await page.getByLabel('Whose number').fill('#')
+  await page.getByRole('button', { name: 'Add test number' }).click()
+  await expect(page.getByText('Write at least 2 letters or digits')).toBeVisible()
   await page.getByLabel('Test number', { exact: true }).fill('9000000088')
   await page.getByLabel('Whose number').fill('QA phone')
   await page.getByRole('button', { name: 'Add test number' }).click()
@@ -123,20 +159,40 @@ test('test numbers: add with a label, the refusals in words, remove', async ({ p
   expect(api.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/test-mode/phones')).at(-1)?.body).toEqual({ phone: '9000000088', label: 'QA phone' })
 
   await page.getByRole('button', { name: 'Remove test number 90000 00099' }).click()
-  await expect(page.getByText('+91 90000 00099 is no longer a test number.')).toBeVisible()
+  await expect(page.getByText('+91 90000 00099 is no longer a test number; its test account was signed out.')).toBeVisible()
   await expect(list).not.toContainText('Play review')
   expect(api.calledTimes('DELETE', '/api/v1/admin/test-mode/phones/9000000099')).toBe(1)
 })
 
-test('an ordinary admin sees the banner while test mode is on, with its end time', async ({ page, context, api }) => {
+test('the banner follows /admin/me by itself: re-read every minute, and on coming back to the app', async ({ page, context, api }) => {
+  await page.clock.install()
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/support')
+  await expect(page.getByRole('heading', { name: 'Support' })).toBeVisible()
+  const banner = page.getByRole('alert').filter({ hasText: 'OTP test mode is on until' })
+  await expect(banner).toBeHidden()
+  // Switched on elsewhere: the minute's re-read shows it, with no reload or click
   api.testMode = { on: true, until: new Date(Date.now() + 90 * 60_000).toISOString(), turnedOnByName: 'Meera Super' }
+  await page.clock.runFor(61_000)
+  await expect(banner).toContainText(istTime(api.testMode.until!))
+  // Switched off elsewhere: coming back to the app (focus) re-reads it once it is 15 s old, before the next minute
+  api.testMode = { on: false, until: null, turnedOnByName: null }
+  const reads = api.calledTimes('GET', '/api/v1/admin/me')
+  await page.clock.runFor(16_000)
+  expect(api.calledTimes('GET', '/api/v1/admin/me')).toBe(reads)
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')))
+  await expect(banner).toBeHidden()
+  expect(api.calledTimes('GET', '/api/v1/admin/me')).toBe(reads + 1)
+})
+
+test('the banner goes by itself when the end time passes', async ({ page, context, api }) => {
+  await page.clock.install()
+  api.testMode = { on: true, until: new Date(Date.now() + 2 * 60_000).toISOString(), turnedOnByName: 'Meera Super' }
   await signedIn(context, api, 'ADMIN')
   await page.goto('/support')
   const banner = page.getByRole('alert').filter({ hasText: 'OTP test mode is on until' })
-  await expect(banner).toContainText(istTime(api.testMode.until!))
-  // Someone switches it off: the next /admin/me says so, and the banner goes
-  api.testMode = { on: false, until: null, turnedOnByName: null }
-  await page.reload()
+  await expect(banner).toBeVisible()
+  await page.clock.fastForward(2 * 60_000 + 20_000)
   await expect(banner).toBeHidden()
 })
 

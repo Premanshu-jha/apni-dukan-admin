@@ -1,5 +1,5 @@
 import { expect, signedIn, test } from './helpers'
-import { API } from './mockApi'
+import { PHOTOS } from './mockApi'
 
 const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 
@@ -15,7 +15,7 @@ test('a re-check shows what changed first: old → new, how far the pin moved, o
         { field: 'shopPhoto', label: 'Shop photo', before: null, after: null },
       ],
       pinMovedMetres: 350,
-      previousShopPhotoUrl: `${API}/photos/old-shop.png`,
+      previousShopPhotoUrl: `${PHOTOS}/old-shop.png`,
       timeline: [
         { at: at(60), event: 'EDITED', byName: 'Ravi Kumar', byAdmin: false, reason: null, note: null, checklist: [] },
         { at: at(3000), event: 'APPROVED', byName: 'Meera Super', byAdmin: true, reason: null, note: 'Board freshly painted', checklist: [] },
@@ -31,7 +31,7 @@ test('a re-check shows what changed first: old → new, how far the pin moved, o
   await expect(changed).toContainText('changed to Shop 14, Ithum Tower')
   await expect(changed).toContainText('(empty)')
   await expect(changed).toContainText('Pin moved 350 m')
-  await expect(changed.getByRole('img', { name: 'Old shop photo' })).toHaveAttribute('src', `${API}/photos/old-shop.png`)
+  await expect(changed.getByRole('img', { name: 'Old shop photo' })).toHaveAttribute('src', `${PHOTOS}/old-shop.png`)
   await expect(changed.getByRole('img', { name: 'New shop photo' })).toHaveAttribute('src', shop.shopPhotoUrl as string)
   // "What changed" comes before the photos
   const order = await page.locator('h2').allTextContents()
@@ -72,10 +72,12 @@ test('a first visit: photos enlarge, Navigate and Call owner links, details, no 
   await expect(page.getByRole('button', { name: 'Reinstate' })).toBeHidden()
 })
 
-test('approve with an optional note: it goes live, the timeline shows it, the counts follow', async ({ page, context, api }) => {
+test('approve with an optional note: it goes live, the timeline shows it, the list and counts follow without a reload', async ({ page, context, api }) => {
   const shop = api.addShop({ name: 'Gupta General Store' })
   await signedIn(context, api)
-  await page.goto(`/shops/${shop.id}`)
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Waiting for first visit: 1' }).click()
+  await page.getByRole('link', { name: /Gupta General Store/ }).click()
   await page.getByRole('button', { name: 'Approve', exact: true }).click()
   const sheet = page.getByRole('dialog')
   await sheet.getByLabel('Internal note (optional)').fill('Met the owner, all good')
@@ -87,8 +89,12 @@ test('approve with an optional note: it goes live, the timeline shows it, the co
   await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeHidden()
   await expect(page.getByRole('list', { name: 'Timeline, newest first' }).getByRole('listitem').first()).toContainText('Approved by Asha Field')
-  await page.goto('/')
+  // Back through the app, within the lists' 10 s freshness: they were refreshed, not served from the cache
+  await page.goBack()
+  await expect(page.getByText('Nothing here')).toBeVisible()
+  await page.goBack()
   await expect(page.getByRole('link', { name: 'Live: 1' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Waiting for first visit: 0' })).toBeVisible()
 })
 
 test('send back: checklist, a reason started from the ticks, checks before sending, then a sent-back draft has no decisions', async ({ page, context, api }) => {
@@ -99,7 +105,7 @@ test('send back: checklist, a reason started from the ticks, checks before sendi
   const sheet = page.getByRole('dialog')
   const reason = sheet.getByLabel('Reason for the owner')
   await sheet.getByRole('button', { name: 'Send back' }).click()
-  await expect(sheet.getByText('Write a reason for the owner (at least 2 letters)')).toBeVisible()
+  await expect(sheet.getByText('Write a reason for the owner')).toBeVisible()
   expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id}/reject`)).toBe(0)
 
   await sheet.getByLabel("Photo doesn't show the name board").check()
@@ -111,7 +117,7 @@ test('send back: checklist, a reason started from the ticks, checks before sendi
   await expect(reason).toHaveValue('Please retake the shop photo with the board, and move the pin to the door.')
   await sheet.getByLabel('Internal note (optional)').fill('x'.repeat(501))
   await sheet.getByRole('button', { name: 'Send back' }).click()
-  await expect(sheet.getByText('Keep the note under 500 letters (now 501)')).toBeVisible()
+  await expect(sheet.getByText('Keep it under 500 characters (now 501)')).toBeVisible()
   await sheet.getByLabel('Internal note (optional)').fill('Owner was polite')
   await sheet.getByRole('button', { name: 'Send back' }).click()
   await expect(page.getByText('Sent back to the owner with your reason.')).toBeVisible()
@@ -160,7 +166,7 @@ test('suspend a live shop, then reinstate it: it waits for a re-check', async ({
   await expect(page.getByText('Re-check after edit')).toBeVisible()
 })
 
-test('409 SHOP_CHANGED: the owner edited meanwhile; Reload shows it, what was typed is kept, and the new version is sent', async ({ page, context, api }) => {
+test('409 SHOP_CHANGED: decisions stay off until Reload works; what was typed is kept and the new version is sent', async ({ page, context, api }) => {
   const shop = api.addShop({ name: 'Gupta General Store' })
   await signedIn(context, api)
   await page.goto(`/shops/${shop.id}`)
@@ -168,11 +174,19 @@ test('409 SHOP_CHANGED: the owner edited meanwhile; Reload shows it, what was ty
   await page.getByRole('dialog').getByLabel('Reason for the owner').fill('Pin is at the wrong building')
   api.ownerEdits(shop.id as string, { addressLine: 'Shop 14, Ithum Tower' })
   await page.getByRole('dialog').getByRole('button', { name: 'Send back' }).click()
-  await expect(page.getByText('The owner changed something; reload and check again')).toBeVisible()
+  const banner = page.getByRole('alert').filter({ hasText: 'This shop changed since you opened it (the owner or another admin). Reload and check again.' })
+  await expect(banner).toBeVisible()
   await expect(page.getByRole('dialog')).toBeHidden()
+  for (const name of ['Approve', 'Send back', 'Suspend']) await expect(page.getByRole('button', { name, exact: true })).toBeDisabled()
+  // A reload that fails keeps the banner, says why, and the buttons stay off
+  api.failOnce.set(`/admin/shops/${shop.id}`, { status: 400, code: 'BAD', message: 'Could not read the shop.' })
   await page.getByRole('button', { name: 'Reload' }).click()
+  await expect(banner).toContainText("Couldn't reload: Could not read the shop.")
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled()
+
+  await page.getByRole('button', { name: 'Reload' }).click()
+  await expect(banner).toBeHidden()
   await expect(page.getByText('Shop 14, Ithum Tower')).toBeVisible()
-  await expect(page.getByText('The owner changed something; reload and check again')).toBeHidden()
   await page.getByRole('button', { name: 'Send back', exact: true }).click()
   await expect(page.getByRole('dialog').getByLabel('Reason for the owner')).toHaveValue('Pin is at the wrong building')
   await page.getByRole('dialog').getByRole('button', { name: 'Send back' }).click()
@@ -181,17 +195,63 @@ test('409 SHOP_CHANGED: the owner edited meanwhile; Reload shows it, what was ty
   expect(sent).toEqual([3, 4])
 })
 
-test('409 WRONG_STATUS: someone else decided first; the shop reloads with its new buttons', async ({ page, context, api }) => {
+test('the version sent is the one on screen when the sheet opened, even after a background re-read', async ({ page, context, api }) => {
   const shop = api.addShop({ name: 'Gupta General Store' })
   await signedIn(context, api)
   await page.goto(`/shops/${shop.id}`)
   await page.getByRole('button', { name: 'Approve', exact: true }).click()
-  // Another admin approved it a moment ago (status and version moved on)
-  api.shops[0].status = 'APPROVED'
+  // The owner moves the pin while the sheet is open; the page re-reads in the background (back to the app)
+  api.ownerEdits(shop.id as string, { latitude: 28.7 })
+  const reads = api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')))
+  await expect.poll(() => api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)).toBeGreaterThan(reads)
   await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
-  await expect(page.getByText("This shop's status changed meanwhile")).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toBeVisible()
+  // Not approved blind: the backend refuses the old version and the admin is told to look again
+  expect(api.calls.find((c) => c.path.endsWith('/approve'))?.body).toEqual({ version: 3 })
+  await expect(page.getByText('This shop changed since you opened it')).toBeVisible()
+  expect(api.shops[0].status).toBe('PENDING_VISIT')
+})
+
+test('409 WRONG_STATUS: another admin decided first; the shop is re-read and says what it is now, and the counts follow', async ({ page, context, api }) => {
+  const shop = api.addShop({ name: 'Gupta General Store' })
+  await signedIn(context, api)
+  // Through the app (no reloads), so the dashboard and list are cached when the 409 comes
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Waiting for first visit: 1' }).click()
+  await page.getByRole('link', { name: /Gupta General Store/ }).click()
+  await page.getByRole('button', { name: 'Send back', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('Shop was shut').check()
+  // Another admin approved it a moment ago (the status, and with it the version, moved on)
+  api.setStatus(shop.id as string, 'APPROVED')
+  const reads = api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)
+  await page.getByRole('dialog').getByRole('button', { name: 'Send back' }).click()
+  await expect(page.getByText('Someone else decided meanwhile: it is now Live.')).toBeVisible()
+  expect(api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)).toBeGreaterThan(reads)
+  // Fields were fine, so the backend answered with the status (checked before the version)
+  expect(api.calls.filter((c) => c.path.endsWith('/reject'))).toHaveLength(1)
+  await expect(page.getByRole('button', { name: 'Send back', exact: true })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toBeEnabled()
+  // Back in the app (within the lists' 10 s freshness): the list and the counts were refreshed, not cached
+  await page.goBack()
+  await expect(page.getByText('Nothing here')).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('link', { name: 'Live: 1' })).toBeVisible()
+})
+
+test('WRONG_STATUS whose re-read fails keeps the banner and the buttons off until Reload works', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  api.setStatus(shop.id as string, 'SUSPENDED', 'Closed down')
+  api.failOnce.set(`/admin/shops/${shop.id}`, { status: 400, code: 'BAD', message: 'Could not read the shop.' })
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
+  const banner = page.getByRole('alert').filter({ hasText: 'Someone else decided meanwhile: it is now Suspended.' })
+  await expect(banner).toContainText("Couldn't reload")
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: 'Reload' }).click()
+  await expect(banner).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Reinstate', exact: true })).toBeEnabled()
 })
 
 test('a double tap on Approve sends once', async ({ page, context, api }) => {
@@ -233,4 +293,118 @@ test('a shop that does not exist, and a page that fails to load', async ({ page,
   await expect(page.getByText('Could not read the shop.')).toBeVisible()
   await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+})
+
+test('weak network: the answer to Approve is lost but it went through; the re-read shows success', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  api.loseAnswer.add('/approve')
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
+  await expect(page.getByText('Approved. The shop is live now.')).toBeVisible()
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toBeVisible()
+  // Sent once: no blind retry of a write
+  expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id}/approve`)).toBe(1)
+})
+
+test('weak network: offline when sending, so nothing went through; the form stays with what was typed', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Send back', exact: true }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Reason for the owner').fill('Board not visible')
+  api.offline = true
+  await sheet.getByRole('button', { name: 'Send back' }).click()
+  await expect(sheet.getByText("You're offline or the server can't be reached. Try again.")).toBeVisible()
+  await expect(sheet.getByLabel('Reason for the owner')).toHaveValue('Board not visible')
+  api.offline = false
+  await sheet.getByRole('button', { name: 'Send back' }).click()
+  await expect(page.getByText('Sent back to the owner with your reason.')).toBeVisible()
+})
+
+test('an admin taken off the team mid-decision is moved out (old token 401, refresh says NONE, /admin/me 403)', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  api.removeFromTeam()
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
+  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  expect(api.shops[0].status).toBe('PENDING_VISIT')
+  await expect(page.getByText(shop.name as string)).toBeHidden()
+})
+
+test('a write refused with 404 (removed while the revocation list is down) re-reads /admin/me at once', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Add note' }).click()
+  await page.getByRole('dialog').getByLabel('Note').fill('Visited, owner away')
+  api.removeFromTeam({ redisDown: true })
+  const meBefore = api.calledTimes('GET', '/api/v1/admin/me')
+  await page.getByRole('dialog').getByRole('button', { name: 'Add note' }).click()
+  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(meBefore)
+})
+
+test('the text rule: a note or reason of only symbols is refused before sending, and by the backend', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Suspend', exact: true }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Reason for the owner').fill(' !!   ?? ')
+  await sheet.getByLabel('Internal note (optional)').fill('.')
+  await sheet.getByRole('button', { name: 'Suspend' }).click()
+  await expect(sheet.getByText('Write at least 2 letters or digits')).toHaveCount(2)
+  expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id}/suspend`)).toBe(0)
+  // Spaces are collapsed before sending, as the backend reads them
+  await sheet.getByLabel('Reason for the owner').fill('  Shop   was\n shut ')
+  await sheet.getByLabel('Internal note (optional)').fill('')
+  await sheet.getByRole('button', { name: 'Suspend' }).click()
+  await expect(page.getByText('Suspended. The owner sees your reason.')).toBeVisible()
+  expect(api.calls.find((c) => c.path.endsWith('/suspend'))?.body).toEqual({ version: 3, reason: 'Shop was shut', checklist: [] })
+})
+
+test('a shop with no photos says so instead of empty boxes', async ({ page, context, api }) => {
+  const shop = api.addShop({ ownerPhotoUrl: null, shopPhotoUrl: null })
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await expect(page.getByText('No shop photo')).toBeVisible()
+  await expect(page.getByText('No owner photo')).toBeVisible()
+  await expect(page.getByRole('button', { name: /tap to enlarge/ })).toHaveCount(0)
+})
+
+test('the photo dialog keeps focus on Close, Escape closes it, and focus goes back to the thumbnail', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  const thumb = page.getByRole('button', { name: 'Owner photo, tap to enlarge' })
+  await thumb.click()
+  const close = page.getByRole('dialog', { name: 'Owner photo' }).getByRole('button', { name: 'Close' })
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Owner photo' })).toBeHidden()
+  await expect(thumb).toBeFocused()
+})
+
+test.describe('on a phone set to New York time', () => {
+  test.use({ timezoneId: 'America/New_York' })
+  test('times are shown in India time', async ({ page, context, api }) => {
+    const shop = api.addShop({ createdAt: '2026-11-01T19:00:00Z' }, {
+      timeline: [{ at: '2026-11-05T13:00:00Z', event: 'SUBMITTED', byName: 'Ravi Kumar', byAdmin: false, reason: null, note: null, checklist: [] }],
+    })
+    await signedIn(context, api)
+    await page.goto(`/shops/${shop.id}`)
+    await expect(page.getByText('Thu 5 Nov, 6:30 PM')).toBeVisible()
+    // 19:00 UTC on 1 Nov is already 2 Nov in India
+    await expect(page.getByText('2 Nov 2026')).toBeVisible()
+  })
 })

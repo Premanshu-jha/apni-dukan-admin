@@ -52,6 +52,17 @@ describe('api client', () => {
     expect(useSession.getState().status).toBe('signedOut')
   })
 
+  it('treats a refresh refused with 401 TEST_MODE_OFF (a test account after test mode ended) as signed out', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) =>
+      String(url).endsWith('/auth/refresh')
+        ? json(401, { code: 'TEST_MODE_OFF', message: 'Test mode is off.' })
+        : json(401, { code: 'TOKEN_EXPIRED', message: 'x' }),
+    )
+    await expect(api('GET', '/a')).rejects.toBeInstanceOf(ApiError)
+    expect(useSession.getState().status).toBe('signedOut')
+    expect(localStorage.getItem('ada.session')).toBeNull()
+  })
+
   it('keeps the backend error code and message', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       json(409, { code: 'SLOT_TAKEN', message: 'That time was just booked', details: {} }),

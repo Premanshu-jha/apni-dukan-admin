@@ -45,10 +45,20 @@ test('dashboard: loading, then an error with Try again, and offline', async ({ p
   await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page.getByRole('link', { name: 'Live: 0' })).toBeVisible()
 
+})
+
+test("dashboard's own offline state, after the app has loaded", async ({ page, context, api }) => {
+  await signedIn(context, api)
+  await page.goto('/more')
+  await expect(page.getByRole('heading', { name: 'More' })).toBeVisible()
+  // The app is open; now the network goes, and the dashboard is opened for the first time
   api.offline = true
-  await page.reload().catch(() => {})
-  // The page itself is served by the preview server; only the API is unreachable
+  await page.getByRole('link', { name: 'Shops' }).click()
   await expect(page.getByText("You're offline or the server can't be reached. Try again.")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('link', { name: /Live/ })).toBeHidden()
+  api.offline = false
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.getByRole('link', { name: 'Live: 0' })).toBeVisible()
 })
 
 test('the list: oldest first, shop number, name, area, how long, Re-check badge', async ({ page, context, api }) => {
@@ -62,9 +72,10 @@ test('the list: oldest first, shop number, name, area, how long, Re-check badge'
   await expect(cards.nth(0)).toContainText('Older Store')
   await expect(cards.nth(0)).toContainText(`#${older.shopCode}`)
   await expect(cards.nth(0)).toContainText('Sector 62, Noida')
-  // statusSince is not in the contract: the card falls back to createdAt (1 Nov 2026), so it says "Waiting N days"
-  await expect(cards.nth(0)).toContainText(/Waiting \d+ days?/)
+  // From statusSince (sent by the backend), not from when the shop was registered
+  await expect(cards.nth(0)).toContainText('Waiting 3 days')
   await expect(cards.nth(1)).toContainText('Newer Store')
+  await expect(cards.nth(1)).toContainText('Waiting 2 h')
   await expect(page.getByText('Re-check')).toBeHidden()
 
   await page.goto('/shops?type=KIRANA&group=RECHECK')
@@ -111,4 +122,23 @@ test('the list: error with Try again, offline, and a wrong address goes to the d
   await expect(page.getByText('Gupta General Store')).toBeVisible()
   await page.goto('/shops?type=SHOES&group=LIVE')
   await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+})
+
+test('search by "#1042", by a phone typed with +91 and spaces, and the 100-row cap', async ({ page, context, api }) => {
+  const gupta = api.addShop({ name: 'Gupta General Store', ownerPhone: '9811100001' })
+  api.addShop({ name: 'Raju Provisions', ownerPhone: '9822200002' })
+  await signedIn(context, api)
+  await page.goto('/shops?type=KIRANA&group=FIRST_VISIT')
+  await page.getByLabel('Search').fill(`#${gupta.shopCode}`)
+  await expect(page.getByRole('list', { name: 'Shops' }).getByRole('listitem')).toHaveCount(1)
+  await expect(page.getByRole('list', { name: 'Shops' })).toContainText('Gupta General Store')
+  expect(api.calls.some((c) => c.path.includes(`q=%23${gupta.shopCode}`))).toBe(true)
+  await page.getByLabel('Search').fill('+91 98222 00')
+  await expect(page.getByRole('list', { name: 'Shops' })).toContainText('Raju Provisions')
+  await expect(page.getByRole('list', { name: 'Shops' }).getByRole('listitem')).toHaveCount(1)
+
+  for (let i = 0; i < 101; i++) api.addShop({ type: 'SALON', status: 'APPROVED', name: `Salon ${i}` })
+  await page.goto('/shops?type=SALON&group=LIVE')
+  await expect(page.getByRole('list', { name: 'Shops' }).getByRole('listitem')).toHaveCount(100)
+  await expect(page.getByText('Showing the oldest 100. Search to find a shop further down.')).toBeVisible()
 })
