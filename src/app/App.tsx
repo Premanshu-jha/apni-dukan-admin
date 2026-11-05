@@ -10,7 +10,9 @@ import { Dashboard } from '../features/shops/Dashboard'
 import { ShopDetail } from '../features/shops/ShopDetail'
 import { ShopList } from '../features/shops/ShopList'
 import { Support } from '../features/support/Support'
-import { AdminGate, FinishingProfile, SignedIn, SignedOutOnly } from './guards'
+import { Team } from '../features/team/Team'
+import { TestMode } from '../features/testmode/TestMode'
+import { AdminGate, FinishingProfile, SignedIn, SignedOutOnly, SuperAdminOnly } from './guards'
 import { Bare, Shell } from './Shell'
 
 export function App() {
@@ -36,6 +38,10 @@ export function App() {
             <Route path="/shops/:id" element={<ShopDetail />} />
             <Route path="/support" element={<Support />} />
             <Route path="/more" element={<More />} />
+            <Route element={<SuperAdminOnly />}>
+              <Route path="/team" element={<Team />} />
+              <Route path="/test-mode" element={<TestMode />} />
+            </Route>
             <Route
               path="*"
               element={
