@@ -1,5 +1,4 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
 import { useAdmin } from '../../app/guards'
 import { Button, Card, Page, Pill } from '../../components/ui'
 import { ROLE_LABELS } from '../../lib/labels'
@@ -10,11 +9,10 @@ import { signOutHere } from '../auth/signOut'
 export function More() {
   const me = useAdmin()
   const qc = useQueryClient()
-  const [busy, setBusy] = useState(false)
   return (
     <Page title="More">
       <Card className="flex flex-col gap-1">
-        <p className="text-lg font-semibold">{me.name || 'No name yet'}</p>
+        <p className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{me.name || 'No name yet'}</p>
         {me.phone && <p className="text-muted">+91 {formatPhone(me.phone)}</p>}
         <div>
           <Pill tone={me.adminRole === 'SUPER_ADMIN' ? 'brand' : 'muted'}>{ROLE_LABELS[me.adminRole]}</Pill>
@@ -22,11 +20,7 @@ export function More() {
       </Card>
       <Button
         variant="danger"
-        busy={busy}
-        onClick={async () => {
-          setBusy(true)
-          await signOutHere(qc)
-        }}
+        onClick={() => signOutHere(qc)}
       >
         Sign out
       </Button>
