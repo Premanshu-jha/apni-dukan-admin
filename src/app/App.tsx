@@ -9,6 +9,7 @@ import { More } from '../features/more/More'
 import { Dashboard } from '../features/shops/Dashboard'
 import { ShopDetail } from '../features/shops/ShopDetail'
 import { ShopList } from '../features/shops/ShopList'
+import { Support } from '../features/support/Support'
 import { AdminGate, FinishingProfile, SignedIn, SignedOutOnly } from './guards'
 import { Bare, Shell } from './Shell'
 
@@ -33,6 +34,7 @@ export function App() {
             <Route index element={<Dashboard />} />
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shops/:id" element={<ShopDetail />} />
+            <Route path="/support" element={<Support />} />
             <Route path="/more" element={<More />} />
             <Route
               path="*"
