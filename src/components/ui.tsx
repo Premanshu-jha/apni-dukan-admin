@@ -95,7 +95,7 @@ const tones: Record<Tone, string> = {
 
 export function Banner({ tone = 'info', children }: { tone?: Tone; children: ReactNode }) {
   return (
-    <div role={tone === 'bad' ? 'alert' : 'status'} className={`rounded-xl border px-4 py-3 text-sm ${tones[tone]}`}>
+    <div role={tone === 'bad' ? 'alert' : 'status'} className={`min-w-0 rounded-xl border px-4 py-3 text-sm [overflow-wrap:anywhere] ${tones[tone]}`}>
       {children}
     </div>
   )
@@ -151,10 +151,10 @@ export function Page({
               ←
             </button>
           )}
-          {title && <h1 className={`text-lg font-semibold ${back ? '' : 'px-2'}`}>{title}</h1>}
+          {title && <h1 className={`min-w-0 flex-1 py-2 text-lg font-semibold [overflow-wrap:anywhere] ${back ? '' : 'px-2'}`}>{title}</h1>}
         </header>
       )}
-      <main className="flex flex-1 flex-col gap-4 px-4 py-4">{children}</main>
+      <main className="flex min-w-0 flex-1 flex-col gap-4 px-4 py-4">{children}</main>
       {footer && (
         <div className="sticky bottom-0 border-t border-line bg-bg/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
           {footer}
@@ -220,7 +220,7 @@ export function Sheet({
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-lg rounded-t-3xl border-t border-line bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
-        <h2 className="mb-3 text-lg font-semibold">{title}</h2>
+        <h2 className="mb-3 min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{title}</h2>
         {children}
       </div>
     </div>
