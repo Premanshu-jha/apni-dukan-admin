@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react'
 import { adminApi } from '../../api/admin'
-import { explain, fieldError, isApiError } from '../../api/errors'
+import { explain, fieldError, isApiError, isNetwork } from '../../api/errors'
 import type { AdminShop, ChecklistItem, TimelineEntry } from '../../api/types'
 import { Banner, Button, Sheet, TextArea } from '../../components/ui'
 import { CHECKLIST, CHECKLIST_LABELS } from '../../lib/labels'
 import {
   checkDecision,
   checkNote,
+  clean,
   DECISION_LABELS,
   NOTE_MAX,
   needsReason,
@@ -51,6 +52,7 @@ export function DecisionSheet({
   onClose,
   onDone,
   onConflict,
+  onUncertain,
 }: {
   shop: AdminShop
   decision: Decision
@@ -59,7 +61,9 @@ export function DecisionSheet({
   onDraft: (d: Draft) => void
   onClose: () => void
   onDone: (shop: AdminShop) => void
-  onConflict: (c: Conflict) => void
+  onConflict: (c: Conflict, error: unknown) => void
+  /** The answer was lost: the page re-reads the shop; true when the decision is seen to have gone through. */
+  onUncertain: () => Promise<boolean>
 }) {
   const sending = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -84,12 +88,13 @@ export function DecisionSheet({
     try {
       const updated = await adminApi.decide(shop.id, decision, {
         version,
-        ...(withReason ? { reason: draft.reason.trim(), checklist: draft.checklist } : {}),
+        ...(withReason ? { reason: clean(draft.reason), checklist: draft.checklist } : {}),
         note: optional(draft.note),
       })
       onDone(updated)
     } catch (err) {
-      if (isApiError(err, 'SHOP_CHANGED') || isApiError(err, 'WRONG_STATUS')) onConflict(err.code as Conflict)
+      if (isApiError(err, 'SHOP_CHANGED') || isApiError(err, 'WRONG_STATUS')) onConflict(err.code as Conflict, err)
+      else if (isNetwork(err) && (await onUncertain())) return
       else setError(err)
     } finally {
       sending.current = false
@@ -124,7 +129,7 @@ export function DecisionSheet({
             value={draft.reason}
             maxLength={REASON_MAX + 50}
             onChange={(e) => onDraft({ ...draft, reason: e.target.value, reasonEdited: true })}
-            hint={`The owner sees this. ${draft.reason.trim().length}/${REASON_MAX}`}
+            hint={`The owner sees this. ${clean(draft.reason).length}/${REASON_MAX}`}
             error={(shown && errors.reason) || fieldError(error, 'reason')}
           />
         )}
@@ -133,7 +138,7 @@ export function DecisionSheet({
           label="Internal note (optional)"
           value={draft.note}
           onChange={(e) => onDraft({ ...draft, note: e.target.value })}
-          hint={`Only admins see this. ${draft.note.trim().length}/${NOTE_MAX}`}
+          hint={`Only admins see this. Optional; 2 to ${NOTE_MAX}. ${clean(draft.note).length}/${NOTE_MAX}`}
           error={(shown && errors.note) || fieldError(error, 'note')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
@@ -180,7 +185,7 @@ export function NoteSheet({
     setBusy(true)
     setError(null)
     try {
-      onDone(await adminApi.addNote(shop.id, note.trim()))
+      onDone(await adminApi.addNote(shop.id, clean(note)))
     } catch (err) {
       setError(err)
     } finally {
@@ -197,7 +202,7 @@ export function NoteSheet({
           label="Note"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          hint={`Only admins see this. ${note.trim().length}/${NOTE_MAX}`}
+          hint={`Only admins see this. ${clean(note).length}/${NOTE_MAX}`}
           error={(shown && problem) || fieldError(error, 'note')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}

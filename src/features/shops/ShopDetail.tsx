@@ -1,9 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router'
-import { keys, useShopDetail } from '../../api/admin'
-import { explain, isApiError } from '../../api/errors'
-import type { AdminShop, Change, ShopDetail as Detail, TimelineEntry } from '../../api/types'
+import { adminApi, keys, useShopDetail } from '../../api/admin'
+import { ADMIN_MESSAGES, explain, isApiError, wrongStatusText } from '../../api/errors'
+import type { AdminShop, Change, ShopDetail as Detail, ShopStatus, TimelineEntry } from '../../api/types'
 import { Photo } from '../../components/Photo'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
 import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, TYPE_LABELS } from '../../lib/labels'
@@ -12,6 +12,14 @@ import { formatPhone } from '../../lib/phone'
 import { DECISION_LABELS, decisionsFor, type Decision } from '../../lib/rules'
 import { dateIst, dateTimeIst } from '../../lib/time'
 import { type Conflict, DecisionSheet, type Draft, EMPTY_DRAFT, NoteSheet } from './DecisionSheet'
+
+/** The status a decision leads to: after a lost answer, seeing it on a re-read means the decision went through. */
+const RESULT: Record<Decision, ShopStatus> = {
+  approve: 'APPROVED',
+  reject: 'DRAFT',
+  suspend: 'SUSPENDED',
+  reinstate: 'PENDING_VISIT',
+}
 
 const DONE_TEXT: Record<Decision, string> = {
   approve: 'Approved. The shop is live now.',
@@ -28,7 +36,12 @@ export function ShopDetail() {
   const [open, setOpen] = useState<{ decision: Decision; version: number } | 'note' | null>(null)
   const [drafts, setDrafts] = useState<Partial<Record<Decision, Draft>>>({})
   const [notice, setNotice] = useState<string | null>(null)
-  const [conflict, setConflict] = useState<Conflict | null>(null)
+  /**
+   * After a 409 the page on screen is out of date: its words, and the decision buttons stay off until a reload
+   * succeeds. A failed reload keeps it (with why).
+   */
+  const [stale, setStale] = useState<{ text: string; reloadError: string | null } | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
   const [reloading, setReloading] = useState(false)
 
   if (detail.isPending) return <Page title="Shop" back><Loading /></Page>
@@ -56,28 +69,63 @@ export function ShopDetail() {
     void qc.invalidateQueries({ queryKey: keys.dashboard })
   }
 
-  async function reload() {
+  /** Reads the shop again; true when it worked (the stale banner goes and the buttons come back). */
+  async function reload(): Promise<boolean> {
     setReloading(true)
-    await detail.refetch()
+    const r = await detail.refetch()
     setReloading(false)
-    setConflict(null)
+    if (r.isError) {
+      setStale((st) => st && { ...st, reloadError: explain(r.error) })
+      return false
+    }
+    setStale(null)
+    return true
   }
 
   function decided(decision: Decision, updated: AdminShop) {
     qc.setQueryData<Detail>(keys.shop(id), (old) => (old ? { ...old, shop: updated } : old))
     setDrafts((d) => ({ ...d, [decision]: undefined }))
     setOpen(null)
-    setConflict(null)
+    setStale(null)
+    setWarning(null)
     setNotice(DONE_TEXT[decision])
     refreshAll()
   }
 
-  function conflicted(c: Conflict) {
+  async function conflicted(c: Conflict, error: unknown) {
     setOpen(null)
     setNotice(null)
-    setConflict(c)
-    // The status moved on: show it as it is now straight away (its buttons change with it).
-    if (c === 'WRONG_STATUS') refreshAll()
+    setWarning(null)
+    // The dashboard and lists are out of date too, whoever changed the shop.
+    void qc.invalidateQueries({ queryKey: keys.shops })
+    void qc.invalidateQueries({ queryKey: keys.dashboard })
+    if (c === 'SHOP_CHANGED') {
+      // The page re-reads in the background, but the admin must look again before deciding: the buttons come back
+      // only after Reload works.
+      setStale({ text: ADMIN_MESSAGES.SHOP_CHANGED, reloadError: null })
+      void qc.invalidateQueries({ queryKey: keys.shop(id) })
+      return
+    }
+    // Someone else decided: show the shop as it is now straight away.
+    const text = wrongStatusText(error)
+    setStale({ text, reloadError: null })
+    if (await reload()) setWarning(text)
+  }
+
+  /**
+   * The decision's answer was lost (weak network, timeout): read the shop again. If it already shows the decision,
+   * it went through; otherwise the form stays and says the phone is offline.
+   */
+  async function uncertain(decision: Decision): Promise<boolean> {
+    try {
+      const now = await adminApi.shop(id)
+      if (now.shop.status !== RESULT[decision]) return false
+      qc.setQueryData<Detail>(keys.shop(id), now)
+      decided(decision, now.shop)
+      return true
+    } catch {
+      return false
+    }
   }
 
   const decisions = decisionsFor(shop.status)
@@ -94,8 +142,10 @@ export function ShopDetail() {
               key={d}
               variant={d === 'approve' || d === 'reinstate' ? 'primary' : d === 'reject' ? 'secondary' : 'danger'}
               className="flex-1"
+              disabled={stale !== null}
               onClick={() => {
                 setNotice(null)
+                setWarning(null)
                 setOpen({ decision: d, version: shop.version })
               }}
             >
@@ -108,17 +158,16 @@ export function ShopDetail() {
         </div>
       }
     >
-      {conflict === 'SHOP_CHANGED' && (
+      {stale && (
         <div role="alert" className="flex flex-col gap-3 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad">
-          <p>The owner changed something; reload and check again</p>
-          <Button variant="secondary" busy={reloading} onClick={reload}>
+          <p>{stale.text}</p>
+          {stale.reloadError && <p>Couldn't reload: {stale.reloadError}</p>}
+          <Button variant="secondary" busy={reloading} onClick={() => void reload()}>
             Reload
           </Button>
         </div>
       )}
-      {conflict === 'WRONG_STATUS' && (
-        <Banner tone="warn">This shop's status changed meanwhile, so that can't be done now. Here is how it is now.</Banner>
-      )}
+      {warning && <Banner tone="warn">{warning}</Banner>}
       {notice && <Banner tone="good">{notice}</Banner>}
       {detail.isError && <Banner tone="warn">Couldn't refresh: {explain(detail.error)}</Banner>}
 
@@ -128,7 +177,7 @@ export function ShopDetail() {
         <Pill tone="muted">{TYPE_LABELS[shop.type]}</Pill>
       </div>
       {shop.statusReason && (
-        <p className="text-sm text-muted">
+        <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
           The owner was told: <span className="text-ink">"{shop.statusReason}"</span>
         </p>
       )}
@@ -206,7 +255,8 @@ export function ShopDetail() {
           onDraft={(d) => setDrafts((all) => ({ ...all, [current.decision]: d }))}
           onClose={() => setOpen(null)}
           onDone={(s) => decided(current.decision, s)}
-          onConflict={conflicted}
+          onConflict={(c, e) => void conflicted(c, e)}
+          onUncertain={() => uncertain(current.decision)}
         />
       )}
       {open === 'note' && (
@@ -228,7 +278,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
       <dt className="text-muted">{label}</dt>
-      <dd className="break-words">{children}</dd>
+      <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </>
   )
 }
@@ -290,7 +340,7 @@ function ChangeRow({ change, detail, shop }: { change: Change; detail: Detail; s
     )
   }
   return (
-    <div className="text-sm">
+    <div className="min-w-0 text-sm [overflow-wrap:anywhere]">
       <p className="font-medium">{change.label}</p>
       <p>
         <span className="text-muted line-through">{change.before || '(empty)'}</span>
@@ -304,7 +354,7 @@ function ChangeRow({ change, detail, shop }: { change: Change; detail: Detail; s
 
 function TimelineItem({ entry }: { entry: TimelineEntry }) {
   return (
-    <Card className="flex flex-col gap-2 text-sm">
+    <Card className="flex min-w-0 flex-col gap-2 text-sm [overflow-wrap:anywhere]">
       <div className="flex items-start justify-between gap-2">
         <p className="font-semibold">{eventLabel(entry)}</p>
         <time dateTime={entry.at} className="shrink-0 text-xs text-muted">
@@ -328,7 +378,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
       {entry.note && (
         <div className="rounded-xl border border-dashed border-brand/50 bg-brand/5 px-3 py-2">
           <p className="mb-1 text-xs font-semibold text-brand">Only admins see this</p>
-          <p className="whitespace-pre-wrap">{entry.note}</p>
+          <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{entry.note}</p>
         </div>
       )}
     </Card>
