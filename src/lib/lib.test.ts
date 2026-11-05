@@ -7,6 +7,8 @@ import {
   checkNote,
   checkText,
   clean,
+  codePoints,
+  hasHiddenCharacters,
   lettersOrDigits,
   checkStrikeReason,
   checkTestPhone,
@@ -127,6 +129,32 @@ describe('decisions and form checks', () => {
     expect(checkDecision('approve', '', 'x'.repeat(500))).toEqual({})
     expect(checkDecision('reinstate', '', 'x'.repeat(501)).note).toMatch(/now 501/)
     expect(checkDecision('approve', '', '.').note).toBe('Write at least 2 letters or digits')
+  })
+
+  it("follows the backend's TextCleaner: hidden characters, NFKC, code points", () => {
+    // A zero-width space (format character) is refused, wherever it is
+    expect(hasHiddenCharacters('Shop\u200Bshut')).toBe(true)
+    expect(checkText('Shop\u200Bshut', 200, 'empty')).toBe('Contains invisible or special characters')
+    expect(checkText('Shop shut\u202E', 200, 'empty')).toBe('Contains invisible or special characters')
+    expect(checkText('Shop\u2028shut', 200, 'empty')).toBe('Contains invisible or special characters')
+    expect(checkText('Shop\uD800shut', 200, 'empty')).toBe('Contains invisible or special characters')
+    expect(checkText('\uE000ab', 200, 'empty')).toBe('Contains invisible or special characters')
+    // Tab, newline and carriage return are allowed (pasted text) and collapse to one space
+    expect(checkText('Shop\t\r\nshut', 200, 'empty')).toBeUndefined()
+    expect(clean('Shop\t\r\n\u00A0\u3000shut')).toBe('Shop shut')
+    // Full-width letters pass and become plain ones
+    expect(checkText('Ｓｈａｒｍａ', 200, 'empty')).toBeUndefined()
+    expect(clean('Ｓｈａｒｍａ')).toBe('Sharma')
+    // "ﷺ" is one character typed, 18 after NFKC: counted after, as the backend saves it
+    expect(codePoints('ﷺ')).toBe(1)
+    expect(codePoints(clean('ﷺ'))).toBe(18)
+    expect(checkText('ﷺ'.repeat(12), 200, 'empty')).toBe('Keep it under 200 characters (now 216)')
+    // 120 letters and 45 emoji: 210 UTF-16 units but 165 code points, so it fits in 200
+    const mixed = 'a'.repeat(120) + '😀'.repeat(45)
+    expect(mixed.length).toBe(210)
+    expect(checkText(mixed, 200, 'empty')).toBeUndefined()
+    // Letters and decimal digits count; other numbers (Roman numerals, fractions) don't
+    expect(lettersOrDigits('ⅫⅫ ½½')).toBe(0)
   })
 
   it('needs at least 2 letters or digits in any script, not just symbols', () => {

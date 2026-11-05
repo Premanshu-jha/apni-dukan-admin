@@ -109,6 +109,7 @@ test('an open session whose next /admin/me answers 404 (revocation list down) mo
 test('a test account is signed out when test mode ends (refresh 401 TEST_MODE_OFF)', async ({ page, context, api }) => {
   api.testMode = { on: true, until: new Date(Date.now() + 3600_000).toISOString(), turnedOnByName: 'Meera Super' }
   api.signedInAsTestAccount = true
+  api.testPhones.push({ phone: '9848012345', label: 'Play review', addedAt: '2026-11-01T05:00:00Z', hasAccount: true })
   await signedIn(context, api, 'NONE')
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
@@ -198,4 +199,40 @@ test('a shop link opened while signed out is kept by the guard and opened after 
   await expect(page).toHaveURL(new RegExp(`/shops/${shop.id}$`))
   await expect(page.getByRole('heading', { name: /Gupta General Store/ })).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('ada.returnTo'))).toBeNull()
+})
+
+test('a test account is signed out when its number is removed while it is signed in (refresh 401 TEST_MODE_OFF)', async ({ page, context, browser, api }) => {
+  api.testMode = { on: true, until: new Date(Date.now() + 3600_000).toISOString(), turnedOnByName: 'Meera Super' }
+  api.signedInAsTestAccount = true
+  api.testPhones.push({ phone: '9848012345', label: 'Play review', addedAt: '2026-11-01T05:00:00Z', hasAccount: true })
+  await signedIn(context, api, 'NONE')
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  // Test mode stays on; still covered, so a fresh sign-in works
+  await page.getByRole('button', { name: 'Check again' }).click()
+  await expect(page.getByText('This number is still not on the team.')).toBeVisible()
+
+  // The super admin removes the number on another phone, through the site
+  const boss = await browser.newContext({ timezoneId: 'Asia/Kolkata' })
+  await api.attach(boss)
+  const bossUser = { id: 'u0', phone: '9000000001', name: 'Meera Super', email: 'm@example.com', emailVerified: true, admin: true, adminRole: 'SUPER_ADMIN' as const }
+  const saved = JSON.stringify({ refreshToken: 'refresh-boss', user: bossUser })
+  api.refreshTokens.set('refresh-boss', 'live')
+  await boss.addInitScript((s) => localStorage.setItem('ada.session', s), saved)
+  const bossPage = await boss.newPage()
+  // The fake backend serves one person at a time: be the super admin while the other phone acts
+  const testUser = api.user
+  api.user = bossUser
+  api.signedInAsTestAccount = false
+  await bossPage.goto('/test-mode')
+  await bossPage.getByRole('button', { name: 'Remove test number 98480 12345' }).click()
+  await expect(bossPage.getByText('is no longer a test number; its test account was signed out.')).toBeVisible()
+  await boss.close()
+  api.user = testUser
+  api.signedInAsTestAccount = true
+
+  expect(api.testMode.on).toBe(true)
+  await page.getByRole('button', { name: 'Check again' }).click()
+  await expect(page).toHaveURL(/\/signin$/)
+  expect(await page.evaluate(() => localStorage.getItem('ada.session'))).toBeNull()
 })

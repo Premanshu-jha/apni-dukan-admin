@@ -47,12 +47,28 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwA
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 
-/** The backend's text rule: cleaned (trimmed, spaces collapsed), within the limits, at least 2 letters or digits. */
+/**
+ * The backend's text rule, as TextCleaner does it, in its order: NFKC; refuse hidden characters (control codes but
+ * tab, newline and carriage return; format; private use; unassigned; lone surrogates; line and paragraph
+ * separators); collapse every kind of space and trim; at least 2 letters or decimal digits; length in code points.
+ */
 export function textProblem(value: unknown, min: number, max: number): string | null {
-  const t = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
-  if (t.length < min || t.length > max) return `must be ${min} to ${max} characters`
-  if ((t.match(/[\p{L}\p{N}]/gu) ?? []).length < 2) return 'must have at least 2 letters or digits'
+  const normal = (typeof value === 'string' ? value : '').normalize('NFKC')
+  for (const ch of normal) {
+    if (ch !== '\t' && ch !== '\n' && ch !== '\r' && /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\u2028\u2029]/u.test(ch)) {
+      return 'contains invisible or special characters'
+    }
+  }
+  const t = cleanText(normal)
+  if ((t.match(/\p{L}|\p{Nd}/gu) ?? []).length < 2) return 'must have at least 2 letters or digits'
+  const length = [...t].length
+  if (length < min || length > max) return `must be ${min} to ${max} characters`
   return null
+}
+
+/** As TextCleaner saves it: NFKC, every run of spaces as one, trimmed. */
+export function cleanText(value: string): string {
+  return value.normalize('NFKC').replace(/[\s\p{Z}]+/gu, ' ').trim()
 }
 
 const PHONE = /^[6-9]\d{9}$/
@@ -78,7 +94,10 @@ export class MockApi {
   realAccounts = new Set<string>(['9811122233'])
   /** Accounts made in test mode: they can't become admins. */
   testAccounts = new Set<string>()
-  /** This person signed in as a test account: when test mode ends their refresh answers 401 TEST_MODE_OFF. */
+  /**
+   * This person signed in as a test account: once test mode no longer covers their number (switched off, ended, or
+   * the number removed), their refresh answers 401 TEST_MODE_OFF.
+   */
   signedInAsTestAccount = false
   /** Next answer of a path (by suffix): a code + status, once. */
   failOnce = new Map<string, { status: number; code: string; message: string; details?: Json }>()
@@ -288,7 +307,9 @@ export class MockApi {
       const state = this.refreshTokens.get(body.refreshToken)
       if (state === 'rotated') return fail(401, 'REFRESH_TOKEN_REUSED', 'For your safety you were signed out everywhere. Sign in again.')
       if (state !== 'live') return fail(401, 'INVALID_REFRESH_TOKEN', 'Sign in again.')
-      if (this.signedInAsTestAccount && !this.testModeOn()) return fail(401, 'TEST_MODE_OFF', 'Test mode is off. Sign in again.')
+      // A test account stays signed in only while test mode covers its number: on, and the number still listed.
+      const covered = this.testModeOn() && this.testPhones.some((t) => t.phone === this.user.phone)
+      if (this.signedInAsTestAccount && !covered) return fail(401, 'TEST_MODE_OFF', 'Test mode is off for this number. Sign in again.')
       this.refreshTokens.set(body.refreshToken, 'rotated')
       return ok(200, this.tokens())
     }
@@ -393,7 +414,7 @@ export class MockApi {
           timeline: x.timeline,
         })
       }
-      const note = typeof body?.note === 'string' ? body.note.trim().replace(/\s+/g, ' ') : ''
+      const note = typeof body?.note === 'string' ? cleanText(body.note) : ''
       if (action === 'notes' && method === 'POST') {
         const problem = textProblem(body.note, 2, 500)
         if (problem) return invalid({ note: problem })
@@ -402,17 +423,10 @@ export class MockApi {
         return ok(201, entry)
       }
       if (action && method === 'POST') {
-        // Order of checks (the contract doesn't fix it): fields first, then the status, then the version.
-        const reason = typeof body.reason === 'string' ? body.reason.trim().replace(/\s+/g, ' ') : ''
+        // Order of checks, as the backend: status (409 WRONG_STATUS with the status now), then version (409
+        // SHOP_CHANGED), then the text fields (400 VALIDATION_FAILED). A missing version is a malformed request (400).
+        if (typeof body.version !== 'number') return invalid({ version: 'is required' })
         const needsReason = action === 'reject' || action === 'suspend'
-        const details: Json = {}
-        if (typeof body.version !== 'number') details.version = 'is required'
-        const reasonProblem = needsReason ? textProblem(body.reason, 2, 200) : null
-        if (reasonProblem) details.reason = reasonProblem
-        // A note is optional: empty means none; given, it follows the text rule (2–500).
-        const noteProblem = note ? textProblem(note, 2, 500) : null
-        if (noteProblem) details.note = noteProblem
-        if (Object.keys(details).length) return invalid(details)
         const from: Record<string, Status[]> = {
           approve: ['PENDING_VISIT'],
           reject: ['PENDING_VISIT'],
@@ -423,6 +437,18 @@ export class MockApi {
           return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
         }
         if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop was changed. Reload and check again.')
+        const reason = typeof body.reason === 'string' ? cleanText(body.reason) : ''
+        const details: Json = {}
+        const reasonProblem = needsReason ? textProblem(body.reason, 2, 200) : null
+        if (reasonProblem) details.reason = reasonProblem
+        // A note is optional: empty means none; given, it follows the text rule (2–500).
+        const noteProblem = note ? textProblem(body.note, 2, 500) : null
+        if (noteProblem) details.note = noteProblem
+        const known = ['NAME_BOARD_NOT_VISIBLE', 'OWNER_PHOTO_UNCLEAR', 'PIN_WRONG', 'ADDRESS_MISMATCH', 'GST_UDYAM_MISMATCH', 'SHOP_SHUT', 'OTHER']
+        if (body.checklist !== undefined && (!Array.isArray(body.checklist) || body.checklist.some((c: unknown) => !known.includes(c as string)))) {
+          details.checklist = 'has an unknown item'
+        }
+        if (Object.keys(details).length) return invalid(details)
         const to: Record<string, Status> = { approve: 'APPROVED', reject: 'DRAFT', suspend: 'SUSPENDED', reinstate: 'PENDING_VISIT' }
         const event: Record<string, string> = { approve: 'APPROVED', reject: 'SENT_BACK', suspend: 'SUSPENDED', reinstate: 'REINSTATED' }
         shop.status = to[action]
@@ -520,7 +546,7 @@ export class MockApi {
       if (this.team.some((m) => m.phone === body.phone)) return fail(409, 'ADMIN_PHONE', "An admin's number can't be a test number.")
       if (this.realAccounts.has(body.phone)) return fail(409, 'REAL_ACCOUNT', 'This number already has a real account.')
       if (this.testPhones.some((t) => t.phone === body.phone)) return fail(409, 'ALREADY_TEST_PHONE', 'Already a test number.')
-      this.testPhones.push({ phone: body.phone, label: body.label.trim().replace(/\s+/g, ' '), addedAt: new Date().toISOString(), hasAccount: false })
+      this.testPhones.push({ phone: body.phone, label: cleanText(body.label), addedAt: new Date().toISOString(), hasAccount: false })
       return ok(201, this.testState())
     }
     const testPhone = p.match(/^\/admin\/test-mode\/phones\/([^/]+)$/)

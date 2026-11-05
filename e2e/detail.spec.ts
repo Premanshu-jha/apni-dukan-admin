@@ -207,8 +207,8 @@ test('the version sent is the one on screen when the sheet opened, even after a 
   await expect.poll(() => api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)).toBeGreaterThan(reads)
   await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
   // Not approved blind: the backend refuses the old version and the admin is told to look again
-  expect(api.calls.find((c) => c.path.endsWith('/approve'))?.body).toEqual({ version: 3 })
   await expect(page.getByText('This shop changed since you opened it')).toBeVisible()
+  expect(api.calls.find((c) => c.path.endsWith('/approve'))?.body).toEqual({ version: 3 })
   expect(api.shops[0].status).toBe('PENDING_VISIT')
 })
 
