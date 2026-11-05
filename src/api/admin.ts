@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from './client'
+import { ApiError } from './errors'
 import type {
   AdminMe,
   AdminShop,
@@ -17,6 +18,26 @@ import type { Decision } from '../lib/rules'
 
 const A = '/api/v1/admin'
 
+/** Called when a write is refused with 403 or 404: maybe this person's role changed. Set by the app. */
+let onRoleDoubt: () => void = () => {}
+export function whenRoleMayHaveChanged(fn: () => void) {
+  onRoleDoubt = fn
+}
+
+/**
+ * Every admin write goes through here (the screens call adminApi directly, not useMutation). A 403 (not an admin,
+ * SUPER_ADMIN_ONLY) or 404 (taken off the team, or a missing shop) re-reads /admin/me at once, so the guards move
+ * the person on; the error still goes to the screen.
+ */
+async function write<T>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return await api<T>(method, path, body === undefined ? {} : { body })
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 403 || e.status === 404)) onRoleDoubt()
+    throw e
+  }
+}
+
 /** Every admin call, one line each, as the contract names them. */
 export const adminApi = {
   me: () => api<AdminMe>('GET', `${A}/me`),
@@ -28,24 +49,24 @@ export const adminApi = {
   },
   shop: (id: string) => api<ShopDetail>('GET', `${A}/shops/${encodeURIComponent(id)}`),
   decide: (id: string, decision: Decision, body: DecisionIn) =>
-    api<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, { body }),
+    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
   addNote: (id: string, note: string) =>
-    api<TimelineEntry>('POST', `${A}/shops/${encodeURIComponent(id)}/notes`, { body: { note } }),
+    write<TimelineEntry>('POST', `${A}/shops/${encodeURIComponent(id)}/notes`, { note }),
 
-  lookupStrikes: (phone: string) => api<StrikeLookup>('POST', `${A}/salon/strikes/lookup`, { body: { phone } }),
+  lookupStrikes: (phone: string) => write<StrikeLookup>('POST', `${A}/salon/strikes/lookup`, { phone }),
   removeStrike: (appointmentId: string, reason: string) =>
-    api<void>('POST', `${A}/salon/strikes/${encodeURIComponent(appointmentId)}/remove`, { body: { reason } }),
+    write<void>('POST', `${A}/salon/strikes/${encodeURIComponent(appointmentId)}/remove`, { reason }),
 
   team: () => api<TeamMember[]>('GET', `${A}/team`),
-  addMember: (phone: string) => api<TeamMember>('POST', `${A}/team`, { body: { phone } }),
-  removeMember: (userId: string) => api<void>('DELETE', `${A}/team/${encodeURIComponent(userId)}`),
+  addMember: (phone: string) => write<TeamMember>('POST', `${A}/team`, { phone }),
+  removeMember: (userId: string) => write<void>('DELETE', `${A}/team/${encodeURIComponent(userId)}`),
 
   testMode: () => api<TestModeState>('GET', `${A}/test-mode`),
-  testModeOn: (hours: number) => api<TestModeState>('PUT', `${A}/test-mode`, { body: { hours } }),
-  testModeOff: () => api<TestModeState>('DELETE', `${A}/test-mode`),
+  testModeOn: (hours: number) => write<TestModeState>('PUT', `${A}/test-mode`, { hours }),
+  testModeOff: () => write<TestModeState>('DELETE', `${A}/test-mode`),
   addTestPhone: (phone: string, label: string) =>
-    api<TestModeState>('POST', `${A}/test-mode/phones`, { body: { phone, label } }),
-  removeTestPhone: (phone: string) => api<TestModeState>('DELETE', `${A}/test-mode/phones/${encodeURIComponent(phone)}`),
+    write<TestModeState>('POST', `${A}/test-mode/phones`, { phone, label }),
+  removeTestPhone: (phone: string) => write<TestModeState>('DELETE', `${A}/test-mode/phones/${encodeURIComponent(phone)}`),
 }
 
 export const keys = {
