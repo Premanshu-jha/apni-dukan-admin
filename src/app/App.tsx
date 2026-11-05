@@ -6,6 +6,8 @@ import { NameStep } from '../features/auth/NameStep'
 import { PhoneStep } from '../features/auth/PhoneStep'
 import { RecoverStep } from '../features/auth/RecoverStep'
 import { More } from '../features/more/More'
+import { Dashboard } from '../features/shops/Dashboard'
+import { ShopList } from '../features/shops/ShopList'
 import { AdminGate, FinishingProfile, SignedIn, SignedOutOnly } from './guards'
 import { Bare, Shell } from './Shell'
 
@@ -27,6 +29,8 @@ export function App() {
       <Route element={<SignedIn />}>
         <Route element={<AdminGate />}>
           <Route element={<Shell />}>
+            <Route index element={<Dashboard />} />
+            <Route path="/shops" element={<ShopList />} />
             <Route path="/more" element={<More />} />
             <Route
               path="*"
