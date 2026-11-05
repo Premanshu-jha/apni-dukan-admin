@@ -17,7 +17,7 @@ export const GROUP_LABELS: Record<ShopGroup, string> = {
 
 /**
  * How long a shop has been in its group, for its card: "Waiting 3 days", "Sent back 2 h ago", "Live for 5 days".
- * `since` is when it entered the status (or when it was created, when the backend doesn't say).
+ * `since` is the shop's statusSince: when it entered its current status.
  */
 export function sinceText(group: ShopGroup | null, since: string, now: number = Date.now()): string {
   const d = howLong(since, now)

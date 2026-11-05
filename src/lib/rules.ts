@@ -49,41 +49,58 @@ export interface DecisionErrors {
   note?: string
 }
 
-/** Checks a decision form the way the backend does: reason 2–200 (when needed), note up to 500. */
+/** Text as the backend reads it: trimmed, runs of spaces and new lines collapsed to one space. */
+export function clean(text: string): string {
+  return text.trim().replace(/\s+/g, ' ')
+}
+
+/** How many letters or digits (any script) a text has: "..." or "!!" alone is not a reason. */
+export function lettersOrDigits(text: string): number {
+  return (text.match(/[\p{L}\p{N}]/gu) ?? []).length
+}
+
+/**
+ * The backend's text rule for reasons, notes, labels and strike reasons: after cleaning, a length within the
+ * limits and at least 2 letters or digits. `empty` is said when nothing was written (for a needed text).
+ */
+export function checkText(text: string, max: number, empty: string): string | undefined {
+  const t = clean(text)
+  if (!t) return empty
+  if (t.length < 2 || lettersOrDigits(t) < 2) return 'Write at least 2 letters or digits'
+  if (t.length > max) return `Keep it under ${max} characters (now ${t.length})`
+  return undefined
+}
+
+/** Checks a decision form the way the backend does: reason 2–200 (when needed), note 2–500 when given. */
 export function checkDecision(d: Decision, reason: string, note: string): DecisionErrors {
   const errors: DecisionErrors = {}
   if (needsReason(d)) {
-    const r = reason.trim()
-    if (r.length < REASON_MIN) errors.reason = 'Write a reason for the owner (at least 2 letters)'
-    else if (r.length > REASON_MAX) errors.reason = `Keep the reason under ${REASON_MAX} letters (now ${r.length})`
+    const r = checkText(reason, REASON_MAX, 'Write a reason for the owner')
+    if (r) errors.reason = r
   }
-  if (note.trim().length > NOTE_MAX) errors.note = `Keep the note under ${NOTE_MAX} letters (now ${note.trim().length})`
+  if (clean(note)) {
+    const n = checkText(note, NOTE_MAX, '')
+    if (n) errors.note = n
+  }
   return errors
 }
 
-/** A note on its own (Add note): needed, up to 500. */
+/** A note on its own (Add note): needed, 2–500. */
 export function checkNote(note: string): string | undefined {
-  const n = note.trim()
-  if (!n) return 'Write the note'
-  if (n.length > NOTE_MAX) return `Keep the note under ${NOTE_MAX} letters (now ${n.length})`
-  return undefined
+  return checkText(note, NOTE_MAX, 'Write the note')
 }
 
-/** Removing a strike: a reason of 2–200 letters (assumed the same limits as a decision reason). */
+/** Removing a strike: a reason of 2–200. */
 export function checkStrikeReason(reason: string): string | undefined {
-  const r = reason.trim()
-  if (r.length < REASON_MIN) return 'Write why (at least 2 letters)'
-  if (r.length > REASON_MAX) return `Keep it under ${REASON_MAX} letters (now ${r.length})`
-  return undefined
+  return checkText(reason, REASON_MAX, 'Write why')
 }
 
-/** A test number: a valid mobile number and a label (who or what it is for). */
+/** A test number: a valid mobile number and a label of 2–60 (who or what it is for). */
 export function checkTestPhone(phone: string, label: string): { phone?: string; label?: string } {
   const errors: { phone?: string; label?: string } = {}
   if (!normalizePhone(phone)) errors.phone = 'Enter a 10-digit Indian mobile number'
-  const l = label.trim()
-  if (!l) errors.label = 'Say whose number this is'
-  else if (l.length > LABEL_MAX) errors.label = `Keep it under ${LABEL_MAX} letters`
+  const l = checkText(label, LABEL_MAX, 'Say whose number this is')
+  if (l) errors.label = l
   return errors
 }
 
@@ -93,6 +110,6 @@ export function validHours(h: number): boolean {
 
 /** Leaves out an empty optional note instead of sending "". */
 export function optional(text: string): string | undefined {
-  const t = text.trim()
+  const t = clean(text)
   return t ? t : undefined
 }

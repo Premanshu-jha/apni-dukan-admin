@@ -79,11 +79,8 @@ export interface AdminShop {
   ownerPhone: string | null
   gstin: string | null
   udyamNumber: string | null
-  /**
-   * Not in the contract: when the shop entered its status (the list is sorted by it). Used for "waiting" when the
-   * backend sends it; otherwise the app falls back to createdAt.
-   */
-  statusSince?: string | null
+  /** When it entered its current status (the waiting time; lists are sorted by it). */
+  statusSince: string
 }
 
 export type ChangeField =
@@ -174,6 +171,7 @@ export interface TeamMember {
   name: string | null
   phone: string
   adminRole: AdminRole
+  /** When they became an admin. */
   since: string
 }
 
