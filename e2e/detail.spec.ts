@@ -226,7 +226,7 @@ test('409 WRONG_STATUS: another admin decided first; the shop is re-read and say
   const reads = api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)
   await page.getByRole('dialog').getByRole('button', { name: 'Send back' }).click()
   await expect(page.getByText('Someone else decided meanwhile: it is now Live.')).toBeVisible()
-  expect(api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)).toBeGreaterThan(reads)
+  await expect.poll(() => api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)).toBeGreaterThan(reads)
   // Fields were fine, so the backend answered with the status (checked before the version)
   expect(api.calls.filter((c) => c.path.endsWith('/reject'))).toHaveLength(1)
   await expect(page.getByRole('button', { name: 'Send back', exact: true })).toBeHidden()

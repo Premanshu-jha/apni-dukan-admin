@@ -24,7 +24,7 @@ test('the dashboard shows the five counts for kirana and salon, each opening its
   await expect(salon.getByRole('link', { name: 'Suspended: 1' })).toBeVisible()
   await salon.getByRole('link', { name: 'Suspended: 1' }).click()
   await expect(page.getByRole('heading', { name: 'Salon: Suspended' })).toBeVisible()
-  expect(api.calls.some((c) => c.path === '/api/v1/admin/shops?type=SALON&group=SUSPENDED')).toBe(true)
+  await expect.poll(() => api.calls.some((c) => c.path === '/api/v1/admin/shops?type=SALON&group=SUSPENDED')).toBe(true)
   // Back keeps the Salon tab
   await page.getByRole('button', { name: 'Back' }).click()
   await expect(page.getByRole('tab', { name: 'Salon' })).toHaveAttribute('aria-selected', 'true')
