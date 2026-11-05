@@ -41,7 +41,7 @@ export function ShopList() {
           type="search"
           inputMode="search"
           autoComplete="off"
-          placeholder="Shop number, name, owner or phone"
+          placeholder="#1042, name, owner or phone"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -85,17 +85,17 @@ export function ShopList() {
 function ShopCard({ shop, now }: { shop: AdminShop; now: number }) {
   return (
     <Link to={`/shops/${shop.id}`} className="block">
-      <Card className="flex flex-col gap-1 hover:bg-raised">
+      <Card className="flex min-w-0 flex-col gap-1 hover:bg-raised">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-brand">#{shop.shopCode}</span>
           {shop.group === 'RECHECK' && <Pill tone="warn">Re-check</Pill>}
         </div>
-        <p className="text-lg font-semibold">{shop.name}</p>
-        <p className="text-sm text-muted">
+        <p className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{shop.name}</p>
+        <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
           {shop.area}, {shop.city}
         </p>
         <p className="text-sm text-muted">
-          {sinceText(shop.group, shop.statusSince ?? shop.createdAt, now)}
+          {sinceText(shop.group, shop.statusSince, now)}
         </p>
       </Card>
     </Link>
