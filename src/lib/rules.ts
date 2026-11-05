@@ -49,25 +49,51 @@ export interface DecisionErrors {
   note?: string
 }
 
-/** Text as the backend reads it: trimmed, runs of spaces and new lines collapsed to one space. */
-export function clean(text: string): string {
-  return text.trim().replace(/\s+/g, ' ')
+/**
+ * The backend's TextCleaner (common/text/TextCleaner.java), step for step, so the screen refuses exactly what the
+ * backend refuses: NFKC (full-width "Ｓｈａｒｍａ" becomes "Sharma"), refuse hidden characters, collapse every kind
+ * of space, at least 2 letters or digits, length in code points (as Postgres counts).
+ */
+
+/** Hidden characters: control codes (but tab, newline, carriage return), format, private use, unassigned, lone surrogates, line and paragraph separators. */
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\u2028\u2029]/u
+const ALLOWED_CONTROLS = new Set(['\t', '\n', '\r'])
+
+/** True when the text holds a character the backend refuses as invisible or special (checked by code point). */
+export function hasHiddenCharacters(text: string): boolean {
+  for (const ch of text.normalize('NFKC')) {
+    if (!ALLOWED_CONTROLS.has(ch) && HIDDEN.test(ch)) return true
+  }
+  return false
 }
 
-/** How many letters or digits (any script) a text has: "..." or "!!" alone is not a reason. */
+/** Text as the backend saves it: NFKC, every run of spaces (any script) as one space, trimmed. */
+export function clean(text: string): string {
+  return text.normalize('NFKC').replace(/[\s\p{Z}]+/gu, ' ').trim()
+}
+
+/** How many letters or decimal digits (any script, by code point): "..." or "!!" alone is not a reason. */
 export function lettersOrDigits(text: string): number {
-  return (text.match(/[\p{L}\p{N}]/gu) ?? []).length
+  return (text.match(/\p{L}|\p{Nd}/gu) ?? []).length
+}
+
+/** Length in code points, as the backend and Postgres count it (an emoji is one, not two). */
+export function codePoints(text: string): number {
+  return [...text].length
 }
 
 /**
- * The backend's text rule for reasons, notes, labels and strike reasons: after cleaning, a length within the
- * limits and at least 2 letters or digits. `empty` is said when nothing was written (for a needed text).
+ * The backend's text rule for reasons, notes, labels and strike reasons, in its order: hidden characters, then
+ * (after cleaning) at least 2 letters or digits, then the length. `empty` is said when nothing was written.
  */
 export function checkText(text: string, max: number, empty: string): string | undefined {
+  if (hasHiddenCharacters(text)) return 'Contains invisible or special characters'
   const t = clean(text)
   if (!t) return empty
-  if (t.length < 2 || lettersOrDigits(t) < 2) return 'Write at least 2 letters or digits'
-  if (t.length > max) return `Keep it under ${max} characters (now ${t.length})`
+  if (lettersOrDigits(t) < 2) return 'Write at least 2 letters or digits'
+  const n = codePoints(t)
+  if (n < 2) return 'Write at least 2 letters or digits'
+  if (n > max) return `Keep it under ${max} characters (now ${n})`
   return undefined
 }
 
