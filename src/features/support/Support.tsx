@@ -5,7 +5,7 @@ import type { Strike, StrikeLookup } from '../../api/types'
 import { Banner, Button, Card, Field, Page, Pill, Sheet, TextArea } from '../../components/ui'
 import { STRIKE_LABELS } from '../../lib/labels'
 import { formatPhone, normalizePhone } from '../../lib/phone'
-import { checkStrikeReason, clean, REASON_MAX } from '../../lib/rules'
+import { checkStrikeReason, clean, codePoints, REASON_MAX } from '../../lib/rules'
 import { dateTimeIst } from '../../lib/time'
 
 /** Support: look up a customer's no-show and late-cancel strikes by phone, and remove one with a reason. */
@@ -171,7 +171,7 @@ function RemoveStrike({
           label="Why remove it"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          hint={`Kept with the strike. ${clean(reason).length}/${REASON_MAX}`}
+          hint={`Kept with the strike. ${codePoints(clean(reason))}/${REASON_MAX}`}
           error={(shown && problem) || fieldError(error, 'reason')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
