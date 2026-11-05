@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react'
 import { adminApi } from '../../api/admin'
-import { explain, fieldError, isApiError } from '../../api/errors'
+import { ADMIN_MESSAGES, explain, fieldError, isApiError, phoneError } from '../../api/errors'
 import type { Strike, StrikeLookup } from '../../api/types'
 import { Banner, Button, Card, Field, Page, Pill, Sheet, TextArea } from '../../components/ui'
 import { STRIKE_LABELS } from '../../lib/labels'
 import { formatPhone, normalizePhone } from '../../lib/phone'
-import { checkStrikeReason, REASON_MAX } from '../../lib/rules'
+import { checkStrikeReason, clean, REASON_MAX } from '../../lib/rules'
 import { dateTimeIst } from '../../lib/time'
 
 /** Support: look up a customer's no-show and late-cancel strikes by phone, and remove one with a reason. */
@@ -16,9 +16,13 @@ export function Support() {
   const [busy, setBusy] = useState(false)
   const [removing, setRemoving] = useState<Strike | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const looking = useRef(false)
   const normalized = normalizePhone(phone)
 
+  /** One lookup at a time: a double tap (or Enter and a tap) sends one. */
   async function lookup(number: string) {
+    if (looking.current) return
+    looking.current = true
     setBusy(true)
     setError(null)
     try {
@@ -27,6 +31,7 @@ export function Support() {
       setFound(null)
       setError(err)
     } finally {
+      looking.current = false
       setBusy(false)
     }
   }
@@ -52,12 +57,13 @@ export function Support() {
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           hint="See their no-show and late-cancel strikes."
+          error={phoneError(error)}
         />
         <Button type="submit" busy={busy} disabled={!normalized}>
           Look up
         </Button>
       </form>
-      {error !== null && (
+      {error !== null && !phoneError(error) && (
         <Banner tone={isApiError(error, 'CUSTOMER_NOT_FOUND') ? 'warn' : 'bad'}>{explain(error)}</Banner>
       )}
       {notice && <Banner tone="good">{notice}</Banner>}
@@ -78,12 +84,12 @@ export function Support() {
               {found.result.strikes.map((s) => (
                 <li key={s.appointmentId}>
                   <Card className="flex items-center justify-between gap-3">
-                    <div className="flex flex-col gap-1 text-sm">
+                    <div className="flex min-w-0 flex-col gap-1 text-sm">
                       <div className="flex items-center gap-2">
                         <Pill tone="bad">{STRIKE_LABELS[s.kind] ?? s.kind}</Pill>
                         <span className="font-semibold">{s.bookingNo}</span>
                       </div>
-                      <span>{s.salonName}</span>
+                      <span className="[overflow-wrap:anywhere]">{s.salonName}</span>
                       <span className="text-muted">{dateTimeIst(s.struckAt)}</span>
                     </div>
                     <Button variant="secondary" onClick={() => setRemoving(s)} aria-label={`Remove strike ${s.bookingNo}`}>
@@ -105,13 +111,29 @@ export function Support() {
             setNotice(`Strike ${removing.bookingNo} removed.`)
             await lookup(found.phone)
           }}
+          onGone={async () => {
+            // Removed by someone else meanwhile: show what is left.
+            setRemoving(null)
+            await lookup(found.phone)
+            setNotice(ADMIN_MESSAGES.STRIKE_NOT_FOUND)
+          }}
         />
       )}
     </Page>
   )
 }
 
-function RemoveStrike({ strike, onClose, onDone }: { strike: Strike; onClose: () => void; onDone: () => void }) {
+function RemoveStrike({
+  strike,
+  onClose,
+  onDone,
+  onGone,
+}: {
+  strike: Strike
+  onClose: () => void
+  onDone: () => void
+  onGone: () => void
+}) {
   const sending = useRef(false)
   const [reason, setReason] = useState('')
   const [shown, setShown] = useState(false)
@@ -127,10 +149,11 @@ function RemoveStrike({ strike, onClose, onDone }: { strike: Strike; onClose: ()
     setBusy(true)
     setError(null)
     try {
-      await adminApi.removeStrike(strike.appointmentId, reason.trim())
+      await adminApi.removeStrike(strike.appointmentId, clean(reason))
       onDone()
     } catch (err) {
-      setError(err)
+      if (isApiError(err, 'STRIKE_NOT_FOUND')) onGone()
+      else setError(err)
     } finally {
       sending.current = false
       setBusy(false)
@@ -148,7 +171,7 @@ function RemoveStrike({ strike, onClose, onDone }: { strike: Strike; onClose: ()
           label="Why remove it"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          hint={`Kept with the strike. ${reason.trim().length}/${REASON_MAX}`}
+          hint={`Kept with the strike. ${clean(reason).length}/${REASON_MAX}`}
           error={(shown && problem) || fieldError(error, 'reason')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
