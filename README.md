@@ -165,14 +165,26 @@ one should go to the others until a shared package is worth it.
 
 ### Where the contract left something open
 
-- **How long a shop has waited.** The list is sorted by when the shop entered its status, but `AdminShop` has no
-  such field. The app reads `statusSince` if the backend sends it, and otherwise counts from `createdAt` (which can
-  overstate a re-check's wait). Scenario 26 is a GAP until the backend adds it.
-- **Removing a strike.** The contract gives no limits for `reason`; the app asks for 2–200 letters, like a decision.
-- **Order of checks on a decision.** The fake backend checks fields (400), then the status (409 `WRONG_STATUS`),
-  then the version (409 `SHOP_CHANGED`). The app handles each the same whatever the order.
 - **403 code from the security config.** Not named in the contract; the fake uses `FORBIDDEN`. The app looks only at
   the status (403 or 404 on `/admin/me` = not on the team).
+
+(Waiting time, the order of checks and the text rules were open in the first contract; the updated contract fixes
+them and the app follows it.)
+
+### Two admins, stale pages and weak networks
+
+A decision answered 409 `SHOP_CHANGED` or `WRONG_STATUS` refreshes the dashboard, the lists and the shop, and turns
+the decision buttons off until a reload works (a failed reload keeps the banner). `WRONG_STATUS` re-reads the shop at
+once and says what it is now. A decision whose answer is lost re-reads the shop: if the shop already shows the
+decision, that is a success; otherwise the form stays, with the offline message. Every admin write goes through one
+path in `api/admin.ts` that re-reads `/admin/me` on 403 or 404.
+
+### Content-Security-Policy
+
+`index.html` carries a CSP meta tag: scripts only from this site and Cloudflare Turnstile, frames only from
+Turnstile, API calls over https (plus `localhost` and the e2e fake), images from https. The dev server leaves it out
+(hot reload needs inline scripts); the build and the end-to-end tests keep it, and every end-to-end test fails if the
+policy blocks anything.
 
 ## Deploying
 
@@ -200,3 +212,25 @@ pages" first):
 - Support: a customer's strikes by phone, remove one with a reason.
 - Super admin: Team (add, remove, refusals in words) and Test mode (test numbers, on for 1–8 hours, off).
 - Unit and end-to-end tests in CI, and the scenario list in `docs/scenarios.md`.
+- After the independent reviews (contract update):
+  - Two admins at once: 409 `WRONG_STATUS` re-reads the shop and says "Someone else decided meanwhile: it is now
+    …"; 409 `SHOP_CHANGED` says the shop changed since it was opened (the owner or another admin). Both refresh the
+    dashboard, lists and shop, and keep the decision buttons off until a reload works.
+  - Weak network: a decision whose answer is lost re-reads the shop and shows success if it went through, otherwise
+    keeps the form with the offline message.
+  - Text rule for reasons, notes, test-number labels and strike reasons: at least 2 letters or digits after
+    trimming (reason 2–200, note 2–500 when given, label 2–60, strike reason 2–200), sent cleaned.
+  - New refusals in words: `INVALID_PHONE` (on the phone field), `STRIKE_NOT_FOUND`, `REAL_ACCOUNT`; new
+    `TEST_PHONE` wording; a refresh refused with `TEST_MODE_OFF` signs out.
+  - Waiting time from `statusSince`; Team shows when each person became an admin.
+  - Test mode page states the rules: only numbers nobody has signed in with, any code only while on, email codes
+    always real, test accounts signed out when it ends or the number is removed.
+  - Writes refused with 403 or 404 re-read `/admin/me` at once.
+  - No sideways scroll at 360 px with long names, notes and URLs; the photo dialog traps focus and returns it.
+  - Sign-out clears the session and cache first and tells the backend in the background.
+  - Support sends one lookup on a double submit.
+  - Content-Security-Policy meta tag.
+  - Tests rewritten so each proves its scenario row (clock-driven banner and `/admin/me`, cache cleared after
+    sign-out, no-reload navigation), and new rows for weak networks, search by "#1042" and "+91", long names,
+    shops with no photos, India time, `REAL_ACCOUNT`, test accounts signed out, removal mid-decision and the
+    100-row cap.
