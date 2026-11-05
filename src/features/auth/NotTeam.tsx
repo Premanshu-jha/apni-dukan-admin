@@ -15,7 +15,7 @@ import { signOutHere } from './signOut'
 export function NotTeam({ onRecheck }: { onRecheck?: () => void }) {
   const qc = useQueryClient()
   const phone = useSession((s) => s.user?.phone)
-  const [busy, setBusy] = useState<'out' | 'check' | null>(null)
+  const [busy, setBusy] = useState<'check' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   async function checkAgain() {
@@ -45,12 +45,8 @@ export function NotTeam({ onRecheck }: { onRecheck?: () => void }) {
       </Button>
       <Button
         variant="danger"
-        busy={busy === 'out'}
         disabled={busy !== null}
-        onClick={async () => {
-          setBusy('out')
-          await signOutHere(qc)
-        }}
+        onClick={() => signOutHere(qc)}
       >
         Sign out
       </Button>
