@@ -1,0 +1,113 @@
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { api } from './client'
+import { ApiError } from './errors'
+import type {
+  AdminMe,
+  AdminShop,
+  Dashboard,
+  DecisionIn,
+  ShopDetail,
+  ShopGroup,
+  ShopType,
+  StrikeLookup,
+  TeamMember,
+  TestModeState,
+  TimelineEntry,
+} from './types'
+import type { Decision } from '../lib/rules'
+
+const A = '/api/v1/admin'
+
+/** Called when a write is refused with 403 or 404: maybe this person's role changed. Set by the app. */
+let onRoleDoubt: () => void = () => {}
+export function whenRoleMayHaveChanged(fn: () => void) {
+  onRoleDoubt = fn
+}
+
+/**
+ * Every admin write goes through here (the screens call adminApi directly, not useMutation). A 403 (not an admin,
+ * SUPER_ADMIN_ONLY) or 404 (taken off the team, or a missing shop) re-reads /admin/me at once, so the guards move
+ * the person on; the error still goes to the screen.
+ */
+async function write<T>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return await api<T>(method, path, body === undefined ? {} : { body })
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 403 || e.status === 404)) onRoleDoubt()
+    throw e
+  }
+}
+
+/** Every admin call, one line each, as the contract names them. */
+export const adminApi = {
+  me: () => api<AdminMe>('GET', `${A}/me`),
+  dashboard: () => api<Dashboard>('GET', `${A}/dashboard`),
+  shops: (type: ShopType, group: ShopGroup, q: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ type, group })
+    if (q.trim()) params.set('q', q.trim())
+    return api<AdminShop[]>('GET', `${A}/shops?${params}`, { signal })
+  },
+  shop: (id: string) => api<ShopDetail>('GET', `${A}/shops/${encodeURIComponent(id)}`),
+  decide: (id: string, decision: Decision, body: DecisionIn) =>
+    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
+  addNote: (id: string, note: string) =>
+    write<TimelineEntry>('POST', `${A}/shops/${encodeURIComponent(id)}/notes`, { note }),
+
+  lookupStrikes: (phone: string) => write<StrikeLookup>('POST', `${A}/salon/strikes/lookup`, { phone }),
+  removeStrike: (appointmentId: string, reason: string) =>
+    write<void>('POST', `${A}/salon/strikes/${encodeURIComponent(appointmentId)}/remove`, { reason }),
+
+  team: () => api<TeamMember[]>('GET', `${A}/team`),
+  addMember: (phone: string) => write<TeamMember>('POST', `${A}/team`, { phone }),
+  removeMember: (userId: string) => write<void>('DELETE', `${A}/team/${encodeURIComponent(userId)}`),
+
+  testMode: () => api<TestModeState>('GET', `${A}/test-mode`),
+  testModeOn: (hours: number) => write<TestModeState>('PUT', `${A}/test-mode`, { hours }),
+  testModeOff: () => write<TestModeState>('DELETE', `${A}/test-mode`),
+  addTestPhone: (phone: string, label: string) =>
+    write<TestModeState>('POST', `${A}/test-mode/phones`, { phone, label }),
+  removeTestPhone: (phone: string) => write<TestModeState>('DELETE', `${A}/test-mode/phones/${encodeURIComponent(phone)}`),
+}
+
+export const keys = {
+  all: ['admin'] as const,
+  me: ['admin', 'me'] as const,
+  dashboard: ['admin', 'dashboard'] as const,
+  shops: ['admin', 'shops'] as const,
+  shopList: (type: ShopType, group: ShopGroup, q: string) => ['admin', 'shops', type, group, q.trim()] as const,
+  shop: (id: string) => ['admin', 'shop', id] as const,
+  team: ['admin', 'team'] as const,
+  testMode: ['admin', 'test-mode'] as const,
+}
+
+/** Who is signed in and whether test mode is on. Re-read every minute and on focus, so the banner stays true. */
+export function useMe() {
+  return useQuery({ queryKey: keys.me, queryFn: adminApi.me, refetchInterval: 60_000, staleTime: 15_000 })
+}
+
+export function useDashboard() {
+  return useQuery({ queryKey: keys.dashboard, queryFn: adminApi.dashboard, staleTime: 10_000 })
+}
+
+export function useShopList(type: ShopType, group: ShopGroup, q: string) {
+  return useQuery({
+    queryKey: keys.shopList(type, group, q),
+    queryFn: ({ signal }) => adminApi.shops(type, group, q, signal),
+    // Keep the last answer on screen while a new search is on its way.
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
+/** A shop's page. Its photo links last a few minutes, so it is re-read every 4 minutes while open. */
+export function useShopDetail(id: string) {
+  return useQuery({ queryKey: keys.shop(id), queryFn: () => adminApi.shop(id), refetchInterval: 4 * 60_000 })
+}
+
+export function useTeam() {
+  return useQuery({ queryKey: keys.team, queryFn: adminApi.team })
+}
+
+export function useTestMode() {
+  return useQuery({ queryKey: keys.testMode, queryFn: adminApi.testMode })
+}
