@@ -10,7 +10,8 @@ export const authApi = {
     api<void>('POST', `${A}/otp/send`, { body: { phone, captchaToken }, auth: false }),
   verifyCode: (phone: string, code: string) =>
     api<Tokens>('POST', `${A}/otp/verify`, { body: { phone, code, device: deviceName() }, auth: false }),
-  logout: (refreshToken: string) => api<void>('POST', `${A}/logout`, { body: { refreshToken }, auth: false }),
+  logout: (refreshToken: string, signal?: AbortSignal) =>
+    api<void>('POST', `${A}/logout`, { body: { refreshToken }, auth: false, signal }),
   rename: (name: string) => api<User>('PATCH', `${A}/me`, { body: { name } }),
   sendEmailCode: (email: string) => api<void>('POST', `${A}/email/send-code`, { body: { email, phoneCode: null } }),
   verifyEmail: (email: string, code: string) => api<User>('POST', `${A}/email/verify`, { body: { email, code } }),
