@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { adminApi, keys, useTestMode } from '../../api/admin'
-import { explain, fieldError } from '../../api/errors'
+import { explain, fieldError, phoneError } from '../../api/errors'
 import type { TestModeState } from '../../api/types'
 import { Banner, Button, Card, ErrorState, Field, Loading, Page, Pill } from '../../components/ui'
 import { formatPhone, normalizePhone } from '../../lib/phone'
-import { checkTestPhone, HOURS_MAX, HOURS_MIN, LABEL_MAX, validHours } from '../../lib/rules'
+import { checkTestPhone, clean, HOURS_MAX, HOURS_MIN, LABEL_MAX, validHours } from '../../lib/rules'
 import { dateIst, testModeActive, untilLabel } from '../../lib/time'
 import { useNow } from '../../lib/useNow'
 
@@ -61,9 +61,14 @@ export function TestMode() {
   return (
     <Page title="Test mode">
       <Banner tone="warn">
-        While test mode is on, every test number below signs in with <strong>any 6-digit code</strong> (no SMS is
-        sent), and its email code also accepts any 6 digits. Every other number works as usual. Switch it off as soon
-        as testing is done.
+        <ul className="flex list-disc flex-col gap-1 pl-4">
+          <li>Only numbers nobody has signed in with can be added as test numbers.</li>
+          <li>
+            While test mode is on, a test number signs in with <strong>any 6-digit code</strong> (no SMS is sent).
+          </li>
+          <li>Email codes are always real, for test numbers too.</li>
+          <li>Test accounts are signed out when test mode ends or is switched off, or when their number is removed.</li>
+        </ul>
       </Banner>
 
       <Card className="flex flex-col gap-3">
@@ -111,7 +116,7 @@ export function TestMode() {
         )}
       </Card>
 
-      {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
+      {error !== null && !phoneError(error) && <Banner tone="bad">{explain(error)}</Banner>}
       {notice && <Banner tone="good">{notice}</Banner>}
 
       <section aria-labelledby="test-numbers" className="flex flex-col gap-2">
@@ -125,7 +130,7 @@ export function TestMode() {
                 <Card className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 flex-col gap-1">
                     <p className="font-semibold">+91 {formatPhone(p.phone)}</p>
-                    <p className="text-sm">{p.label}</p>
+                    <p className="text-sm [overflow-wrap:anywhere]">{p.label}</p>
                     <div className="flex items-center gap-2 text-xs text-muted">
                       <Pill tone={p.hasAccount ? 'good' : 'muted'}>{p.hasAccount ? 'Has an account' : 'No account yet'}</Pill>
                       added {dateIst(p.addedAt)}
@@ -136,7 +141,7 @@ export function TestMode() {
                     aria-label={`Remove test number ${formatPhone(p.phone)}`}
                     busy={busy === `rm-${p.phone}`}
                     disabled={busy !== null}
-                    onClick={() => run(`rm-${p.phone}`, () => adminApi.removeTestPhone(p.phone), `+91 ${formatPhone(p.phone)} is no longer a test number.`)}
+                    onClick={() => run(`rm-${p.phone}`, () => adminApi.removeTestPhone(p.phone), `+91 ${formatPhone(p.phone)} is no longer a test number; its test account was signed out.`)}
                   >
                     Remove
                   </Button>
@@ -153,7 +158,7 @@ export function TestMode() {
             setShown(true)
             const n = normalizePhone(phone)
             if (!n || phoneErrors.label) return
-            void run('add', () => adminApi.addTestPhone(n, label.trim()), `+91 ${formatPhone(n)} is a test number now.`, () => {
+            void run('add', () => adminApi.addTestPhone(n, clean(label)), `+91 ${formatPhone(n)} is a test number now.`, () => {
               setPhone('')
               setLabel('')
               setShown(false)
@@ -169,12 +174,13 @@ export function TestMode() {
             placeholder="98480 12345"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            error={(shown && phoneErrors.phone) || fieldError(error, 'phone')}
+            error={(shown && phoneErrors.phone) || phoneError(error)}
           />
           <Field
             id="test-label"
             label="Whose number"
             placeholder="Play Store review"
+            hint={`2 to ${LABEL_MAX} characters`}
             maxLength={LABEL_MAX + 10}
             value={label}
             onChange={(e) => setLabel(e.target.value)}

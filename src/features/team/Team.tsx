@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { adminApi, keys, useTeam } from '../../api/admin'
-import { explain, fieldError } from '../../api/errors'
+import { explain, phoneError } from '../../api/errors'
 import type { TeamMember } from '../../api/types'
 import { useAdmin } from '../../app/guards'
 import { Banner, Button, Card, EmptyState, ErrorState, Field, Loading, Page, Pill, Sheet } from '../../components/ui'
@@ -54,14 +54,14 @@ export function Team() {
           placeholder="98480 12345"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          hint="An account is made for the number if it has none."
-          error={fieldError(error, 'phone')}
+          hint="An account is made for the number if it has none. Their other sessions end; they sign in again."
+          error={phoneError(error)}
         />
         <Button type="submit" busy={busy} disabled={!normalized}>
           Add to the team
         </Button>
       </form>
-      {error !== null && !fieldError(error, 'phone') && <Banner tone="bad">{explain(error)}</Banner>}
+      {error !== null && !phoneError(error) && <Banner tone="bad">{explain(error)}</Banner>}
       {notice && <Banner tone="good">{notice}</Banner>}
 
       {team.isPending ? (
@@ -76,14 +76,14 @@ export function Team() {
             <li key={m.userId}>
               <Card className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-col gap-1">
-                  <p className="font-semibold">
+                  <p className="font-semibold [overflow-wrap:anywhere]">
                     {m.name || 'No name yet'}
                     {m.userId === me.userId && <span className="text-muted"> (you)</span>}
                   </p>
                   <p className="text-sm text-muted">+91 {formatPhone(m.phone)}</p>
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <Pill tone={m.adminRole === 'SUPER_ADMIN' ? 'brand' : 'muted'}>{ROLE_LABELS[m.adminRole]}</Pill>
-                    since {dateIst(m.since)}
+                    admin since {dateIst(m.since)}
                   </div>
                 </div>
                 {m.adminRole !== 'SUPER_ADMIN' && (
