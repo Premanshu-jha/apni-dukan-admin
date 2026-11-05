@@ -8,6 +8,7 @@ import {
   checkDecision,
   checkNote,
   clean,
+  codePoints,
   DECISION_LABELS,
   NOTE_MAX,
   needsReason,
@@ -129,7 +130,7 @@ export function DecisionSheet({
             value={draft.reason}
             maxLength={REASON_MAX + 50}
             onChange={(e) => onDraft({ ...draft, reason: e.target.value, reasonEdited: true })}
-            hint={`The owner sees this. ${clean(draft.reason).length}/${REASON_MAX}`}
+            hint={`The owner sees this. ${codePoints(clean(draft.reason))}/${REASON_MAX}`}
             error={(shown && errors.reason) || fieldError(error, 'reason')}
           />
         )}
@@ -138,7 +139,7 @@ export function DecisionSheet({
           label="Internal note (optional)"
           value={draft.note}
           onChange={(e) => onDraft({ ...draft, note: e.target.value })}
-          hint={`Only admins see this. Optional; 2 to ${NOTE_MAX}. ${clean(draft.note).length}/${NOTE_MAX}`}
+          hint={`Only admins see this. Optional; 2 to ${NOTE_MAX}. ${codePoints(clean(draft.note))}/${NOTE_MAX}`}
           error={(shown && errors.note) || fieldError(error, 'note')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
@@ -202,7 +203,7 @@ export function NoteSheet({
           label="Note"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          hint={`Only admins see this. ${clean(note).length}/${NOTE_MAX}`}
+          hint={`Only admins see this. ${codePoints(clean(note))}/${NOTE_MAX}`}
           error={(shown && problem) || fieldError(error, 'note')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
