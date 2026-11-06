@@ -14,7 +14,8 @@ as written and a test proves it (a test that would fail if the behaviour broke).
 code.
 
 Updated 2026-11-05 after the independent reviews (contract update: `statusSince`, order of checks, text rule, new
-error codes, test-mode rules).
+error codes, test-mode rules). Updated 2026-11-06 for the backend's scale PR (#31): lists 50 a page (rows 30, 36,
+90–94) and ETags (95–96).
 
 ## Sign-in and session
 
@@ -59,14 +60,19 @@ error codes, test-mode rules).
 | 27 | DRAFT without a reason (registration not finished) | in no group | Not counted | AdminIT.theDashboardCountsEachGroupAndTheListsSearch | e2e:shops "the dashboard shows the five counts…" | OK-tested |
 | 28 | Dashboard loading and error | slow; 4xx | Spinner; message with Try again (network and 5xx retried twice first) | — | e2e:shops "dashboard: loading, then an error with Try again…" | OK-tested |
 | 29 | Dashboard offline, after the app has loaded | no network | "You're offline…" with Try again, no counts; works again once back online | — | e2e:shops "dashboard's own offline state, after the app has loaded" | OK-tested |
-| 30 | List for a type and group | `GET /admin/shops?type&group` longest in its group first (by `statusSince`) | Cards: shop number, name, area and city, how long, Re-check badge for RECHECK | AdminIT.editsMadeWhileLiveShowAtTheReCheckAndTheQueueKeepsItsOrder | e2e:shops "the list: oldest first…" | OK-tested |
+| 30 | List for a type and group | `GET /admin/shops?type&group` longest in its group first (by `statusSince`, then id), 50 a page | Cards: shop number, name, area and city, how long, Re-check badge for RECHECK | AdminIT.editsMadeWhileLiveShowAtTheReCheckAndTheQueueKeepsItsOrder | e2e:shops "the list: oldest first…" | OK-tested |
 | 31 | How long it has waited | `statusSince` on every AdminShop | "Waiting 3 days", "Waiting 2 h", "Sent back 20 min ago", "Live for 1 day" from `statusSince` | AdminIT.editsMadeWhileLiveShowAtTheReCheckAndTheQueueKeepsItsOrder | e2e:shops "the list: oldest first…"; unit:lib.test "says how long…" | OK-tested |
 | 32 | Search | `q`: name / owner name contains | One request after typing stops (300 ms); kept in the address for Back | AdminIT.theDashboardCountsEachGroupAndTheListsSearch | e2e:shops "search asks once typing stops…" | OK-tested |
-| 33 | Search by "#1042" or a phone typed with +91, spaces or dashes | shop number exactly ("1042" or "#1042"); owner phone in part, "+91", spaces, dashes ignored | The matching shop | AdminIT.theDashboardCountsEachGroupAndTheListsSearch (number and phone part; not "#" or "+91") | e2e:shops "search by \"#1042\", by a phone typed with +91…" | OK-tested |
+| 33 | Search by "#1042" or a phone typed with +91, spaces or dashes | shop number exactly ("1042" or "#1042"); owner phone in part, "+91", spaces, dashes ignored | The matching shop | AdminIT.theDashboardCountsEachGroupAndTheListsSearch (number and phone part; not "#" or "+91") | e2e:shops "search by \"#1042\" and by a phone typed with +91…" | OK-tested |
 | 34 | No match, empty group | 200 `[]` | "No shop matches" / "Nothing here" | — | e2e:shops "search asks once…" | OK-tested |
 | 35 | List error, offline | 400; no network | Message with Try again | — | e2e:shops "the list: error with Try again, offline…" | OK-tested |
-| 36 | More than 100 in a group | at most 100 (backend LIST_LIMIT) | 100 cards and "Showing the oldest 100. Search to find a shop further down." | — | e2e:shops "search by \"#1042\"… and the 100-row cap" | OK-tested |
+| 36 | More than 50 in a group | 200, pages of 50; the next page with `afterSince` + `afterId` = the last shop's `statusSince` (exactly as received) and id | "First 50 shops, longest waiting first" and "Show more shops" until a page is shorter than 50, then "N shops"; every shop once, in order, ties at a page's end broken by id | AdminIT.aLongListComesFiftyAPageInOrderWithNothingTwiceOrLeftOut | e2e:shops "120 shops come 50 at a time over 3 pages…" | OK-tested |
 | 37 | Wrong type or group in the address | — (not sent) | Dashboard | — | e2e:shops "the list: error… a wrong address…" | OK-tested |
+| 90 | Exactly 50 in a group | 200 [50], then 200 [] | One extra page, then "50 shops" and no button | — | e2e:shops "exactly 50 shops…" | OK-tested |
+| 91 | "Show more shops" fails (5xx, offline) | 500; no network | The shops already shown stay (no error screen); "Couldn't load more shops…" or "You're offline…"; the button says "Loading more shops…" with aria-busy (still focusable) while it loads; tapping again works. A tap while the phone says it is offline says so at once and sends nothing; that note goes with a new search, group or type, or once a page loads | — | e2e:shops "a failed \"Show more shops\" keeps the list…", "\"Show more shops\" while the phone says it is offline…" | OK-tested |
+| 92 | Keyboard or screen reader on "Show more shops" | — | Focus moves to the first new shop; when the last page was empty (the button goes) focus moves to the count; after a failed page it stays on the button; the count is announced | — | e2e:shops "120 shops come 50 at a time…", "exactly 50 shops…", "a failed \"Show more shops\"…" (focus) | OK-tested |
+| 93 | A new search, group or type while pages are loaded | the first page again (no cursor) | Starts from the first 50 of the new list | — | e2e:shops "a search starts again from the first page" | OK-tested |
+| 94 | Half a cursor, or one that can't be read | Half: 400 VALIDATION_FAILED `{afterId: "send afterSince and afterId together"}`. Unreadable (e.g. `afterSince=yesterday`, a broken id): 400 BAD_REQUEST "'yesterday' is not a valid value for 'afterSince'", empty details (checked first) | — (the app always sends both, as received) | AdminIT.aLongListComesFiftyAPageInOrderWithNothingTwiceOrLeftOut | e2e:shops "the fake backend refuses half or unreadable cursors…" | OK-tested |
 
 ## Shop page and decisions
 
@@ -139,3 +145,5 @@ error codes, test-mode rules).
 | 87 | Offline use, home-screen install (no service worker) | — | — | — | — | N/A-v1 |
 | 88 | Editing a shop's details for the owner | — | — (the owner edits in the partner app) | — | — | N/A-v1 |
 | 89 | Light theme | — | — (dark only) | — | — | N/A-v1 |
+| 95 | A screen re-read with nothing changed | Every GET 200 carries an `ETag`; sent back as `If-None-Match`, 304 with no body (`Cache-Control: no-store` stays) | The client keeps the last ETag and data per address in memory only (per person, at most 200) and shows the kept data on 304: no error, no retry; a 304 with nothing kept for it (a proxy, or the person changed meanwhile) is asked once more without If-None-Match (no-store) | AdminIT.anUnchangedAnswerIsA304WithNoBodyAndAChangeGivesANewOne | e2e:shops "a refresh answered 304…"; unit:client.test "sends the kept ETag…", "keeps at most 200…", "asks once more for the whole answer…" | OK-tested |
+| 96 | Sign-out, session ended, or another person signs in | — | The kept answers are forgotten with the session; one arriving after sign-out is not kept | — | unit:client.test "forgets everything on sign-out…", "…when another tab signs out (the storage event)", "a 304 arriving after sign-out…", "does not keep an answer that arrives after sign-out" | OK-tested |

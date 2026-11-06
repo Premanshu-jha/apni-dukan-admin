@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { BrowserContext, Route } from '@playwright/test'
 
 /**
@@ -73,6 +74,20 @@ export function cleanText(value: string): string {
 
 const PHONE = /^[6-9]\d{9}$/
 
+/** Shops a list page returns (ShopReviewStore.PAGE). */
+const SHOPS_PAGE = 50
+
+/** An ETag as Spring's ShallowEtagHeaderFilter makes it: "0" and the MD5 of the body, in quotes. */
+export function etagOf(body: string): string {
+  return `"0${createHash('md5').update(body).digest('hex')}"`
+}
+
+/** If-None-Match holds this ETag (a list, weak or strong, or *), as the filter compares them. */
+function matches(ifNoneMatch: string | undefined, etag: string): boolean {
+  if (!ifNoneMatch) return false
+  return ifNoneMatch.split(',').some((t) => t.trim() === '*' || t.trim().replace(/^W\//, '') === etag)
+}
+
 export class MockApi {
   user: MockUser = MockApi.completeUser('ADMIN')
   calls: Call[] = []
@@ -99,6 +114,10 @@ export class MockApi {
    * the number removed), their refresh answers 401 TEST_MODE_OFF.
    */
   signedInAsTestAccount = false
+  /** How many next-page requests of a shop list fail with 500 (the pages already shown must stay). */
+  failShopPages = 0
+  /** Paths (with the query) answered 304 Not Modified, in order. */
+  notModified: string[] = []
   /** Next answer of a path (by suffix): a code + status, once. */
   failOnce = new Map<string, { status: number; code: string; message: string; details?: Json }>()
   private n = 0
@@ -287,10 +306,21 @@ export class MockApi {
     for (const [suffix, ms] of this.slow) if (p.endsWith(suffix)) await new Promise((r) => setTimeout(r, ms))
     const lost = [...this.loseAnswer].find((suffix) => p.endsWith(suffix))
     if (lost) this.loseAnswer.delete(lost)
-    const ok = (status: number, json?: unknown) =>
-      lost
-        ? route.abort('timedout')
-        : route.fulfill({ status, headers: { ...this.cors(), 'Content-Type': 'application/json' }, body: json === undefined ? '' : JSON.stringify(json) })
+    const ok = (status: number, json?: unknown) => {
+      if (lost) return route.abort('timedout')
+      const text = json === undefined ? '' : JSON.stringify(json)
+      // Every successful GET carries an ETag; sent back unchanged as If-None-Match, the answer is 304 with no body
+      const etag = method === 'GET' && status >= 200 && status < 300 ? etagOf(text) : null
+      if (etag && matches(req.headers()['if-none-match'], etag)) {
+        this.notModified.push(url.pathname + url.search)
+        return route.fulfill({ status: 304, headers: { ...this.cors(), ETag: etag }, body: '' })
+      }
+      return route.fulfill({
+        status,
+        headers: { ...this.cors(), 'Content-Type': 'application/json', ...(etag ? { ETag: etag } : {}) },
+        body: text,
+      })
+    }
     const fail = (status: number, code: string, message: string, details: Json = {}) => ok(status, { code, message, details })
     const invalid = (details: Json) => fail(400, 'VALIDATION_FAILED', 'Some fields are not valid', details)
 
@@ -380,6 +410,22 @@ export class MockApi {
       if (type !== 'KIRANA' && type !== 'SALON') details.type = 'must be KIRANA or SALON'
       if (!['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED'].includes(group ?? '')) details.group = 'is required'
       if (Object.keys(details).length) return invalid(details)
+      // The next page: after the last shop's statusSince and id (ShopAdminController). Spring reads the values first:
+      // one that isn't an instant or an id (this fake's ids stand in for the backend's UUIDs) is 400 BAD_REQUEST from
+      // GlobalExceptionHandler.handleTypeMismatch; an empty one counts as not sent. Then half a cursor is
+      // 400 VALIDATION_FAILED.
+      const afterSince = url.searchParams.get('afterSince') || null
+      const afterId = url.searchParams.get('afterId') || null
+      const unreadable = (value: string, name: string) => fail(400, 'BAD_REQUEST', `'${value}' is not a valid value for '${name}'`)
+      if (afterSince !== null && (!/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(afterSince) || Number.isNaN(Date.parse(afterSince)))) {
+        return unreadable(afterSince, 'afterSince')
+      }
+      if (afterId !== null && !/^shop\d+$/.test(afterId)) return unreadable(afterId, 'afterId')
+      if ((afterSince === null) !== (afterId === null)) return invalid({ afterId: 'send afterSince and afterId together' })
+      if (afterId !== null && this.failShopPages > 0) {
+        this.failShopPages -= 1
+        return fail(500, 'INTERNAL_ERROR', 'Something went wrong on our side.')
+      }
       const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
       // Shop number exactly ("1042" or "#1042"); owner phone in part (spaces, "+91", dashes ignored); name or owner name.
       const number = q.replace(/^#/, '')
@@ -392,9 +438,12 @@ export class MockApi {
           if (/^\d+$/.test(digits) && typeof s.ownerPhone === 'string' && s.ownerPhone.includes(digits)) return true
           return [s.name, s.ownerName].some((v) => typeof v === 'string' && v.toLowerCase().includes(q))
         })
-        .sort((a, b) => Date.parse(this.extra.get(a.id as string)!.statusSince) - Date.parse(this.extra.get(b.id as string)!.statusSince))
-        .slice(0, 100)
-      return ok(200, list.map((s) => this.view(s)))
+        // Longest waiting first, ties by id; a page is everything after the cursor (keyset), 50 at most
+        .map((s) => ({ s, since: Date.parse(this.extra.get(s.id as string)!.statusSince), id: s.id as string }))
+        .sort((a, b) => a.since - b.since || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .filter((x) => afterId === null || x.since > Date.parse(afterSince!) || (x.since === Date.parse(afterSince!) && x.id > afterId))
+        .slice(0, SHOPS_PAGE)
+      return ok(200, list.map((x) => this.view(x.s)))
     }
 
     const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|notes))?$/)
@@ -562,7 +611,8 @@ export class MockApi {
   private cors() {
     return {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-None-Match',
+      'Access-Control-Expose-Headers': 'Retry-After, ETag',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     }
   }
