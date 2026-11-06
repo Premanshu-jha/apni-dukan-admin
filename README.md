@@ -74,7 +74,7 @@ reviews walk the list against the code.
 | Sign in, code, recovery | `/signin`, `/signin/code`, `/signin/recover` | Everyone |
 | Email and name steps | `/welcome/email`, `/welcome/name` | Admins who haven't given them yet |
 | Dashboard: Kirana / Salon, five counts | `/?type=SALON` | Admins |
-| Shop list for a type and group, with search | `/shops?type=KIRANA&group=FIRST_VISIT&q=` | Admins |
+| Shop list for a type and group, with search, 50 at a time ("Show more shops") | `/shops?type=KIRANA&group=FIRST_VISIT&q=` | Admins |
 | Shop page: what changed, photos, details, Navigate, Call owner, timeline, decisions | `/shops/:id` | Admins |
 | Support: a customer's strikes | `/support` | Admins |
 | Team | `/team` | Super admin |
@@ -195,6 +195,28 @@ set `VITE_API_URL` (and `VITE_TURNSTILE_SITE_KEY` in production). All routes mus
 needs the network.
 
 ## Changelog
+
+### 0.2.0 — 2026-11-06
+
+Needs the backend's scale PR (apni-dukan-backend #31: list pages with `afterSince` and `afterId`, ETags):
+
+- Shop lists come 50 at a time, longest waiting first, with "Show more shops" (was: at most 100, then "search to
+  find a shop further down"). The next page asks after the last shop's `statusSince` (exactly as received) and id,
+  until a page is shorter than 50. A new search, group or type starts again from the first page.
+- "First 50 shops" / "N shops, longest waiting first"; the count is announced and focus moves to the first new shop.
+  A failed "Show more shops" keeps the shops already shown and says so (offline too); the button stays focusable
+  while it loads (aria-busy, "Loading more shops…").
+- ETags: the API client keeps the last answer to each read in memory only (per person, at most 200 addresses), sends
+  its ETag as `If-None-Match` and shows the kept data on a 304, so a screen re-read with nothing changed downloads
+  nothing. Answers stay `no-store`; the memory is forgotten on sign-out, when the session ends and when another
+  person signs in. A 304 is never an error and never retried.
+- A 304 for which nothing is kept (a cache or proxy on the way, or the person signed out or changed while the
+  read was on its way) is asked once more without `If-None-Match` and past any cache, instead of becoming an error.
+- After an empty last page focus moves to the count (the button is gone); after a failed page it stays on the
+  button. "You're offline" from a tap goes with a new search, group or type, or once a page loads.
+- Tests: the fake backend pages like the real one (keyset, ties by id, 400 for half or unreadable cursors) and
+  answers ETags and 304s the same way; end-to-end journeys for 120 shops over 3 pages, a failed page, exactly 50, a
+  search starting over and a 304 refresh; unit tests of the ETag memory.
 
 ### 0.1.0 — 2026-11-05 (first version)
 
