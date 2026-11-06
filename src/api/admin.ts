@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { api } from './client'
 import { ApiError } from './errors'
 import type {
@@ -42,9 +42,15 @@ async function write<T>(method: string, path: string, body?: unknown): Promise<T
 export const adminApi = {
   me: () => api<AdminMe>('GET', `${A}/me`),
   dashboard: () => api<Dashboard>('GET', `${A}/dashboard`),
-  shops: (type: ShopType, group: ShopGroup, q: string, signal?: AbortSignal) => {
+  /** One page of a group's shops; `after` is the last shop of the page before (null: the first page). */
+  shops: (type: ShopType, group: ShopGroup, q: string, after: AdminShop | null, signal?: AbortSignal) => {
     const params = new URLSearchParams({ type, group })
     if (q.trim()) params.set('q', q.trim())
+    if (after) {
+      // Exactly as received: the backend reads the instant back to the microsecond
+      params.set('afterSince', after.statusSince)
+      params.set('afterId', after.id)
+    }
     return api<AdminShop[]>('GET', `${A}/shops?${params}`, { signal })
   },
   shop: (id: string) => api<ShopDetail>('GET', `${A}/shops/${encodeURIComponent(id)}`),
@@ -89,10 +95,20 @@ export function useDashboard() {
   return useQuery({ queryKey: keys.dashboard, queryFn: adminApi.dashboard, staleTime: 10_000 })
 }
 
+/** Shops per page from the backend (ShopReviewStore.PAGE); a shorter page is the last one. */
+export const SHOPS_PAGE = 50
+
+/**
+ * A group's shops, longest waiting first, a page at a time. The next page starts after the last shop's statusSince
+ * and id (keyset paging), so a group with thousands of shops is never loaded at once. A new search, group or type
+ * is a new key: it starts again from the first page.
+ */
 export function useShopList(type: ShopType, group: ShopGroup, q: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: keys.shopList(type, group, q),
-    queryFn: ({ signal }) => adminApi.shops(type, group, q, signal),
+    initialPageParam: null as AdminShop | null,
+    queryFn: ({ pageParam, signal }) => adminApi.shops(type, group, q, pageParam, signal),
+    getNextPageParam: (last: AdminShop[]) => (last.length < SHOPS_PAGE ? undefined : last[last.length - 1]),
     // Keep the last answer on screen while a new search is on its way.
     placeholderData: keepPreviousData,
     staleTime: 10_000,
