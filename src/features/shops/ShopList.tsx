@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useSearchParams } from 'react-router'
 import { useShopList } from '../../api/admin'
-import { explain, isNetwork } from '../../api/errors'
+import { explain, fieldError, isNetwork } from '../../api/errors'
 import type { AdminShop } from '../../api/types'
 import { Banner, Button, Card, EmptyState, ErrorState, Field, Loading, Page, Pill, Spinner } from '../../components/ui'
 import { GROUP_LABELS, isGroup, isShopType, sinceText, TYPE_LABELS } from '../../lib/labels'
+import { searchable } from '../../lib/rules'
 import { useDebounced } from '../../lib/useDebounced'
 import { useNow } from '../../lib/useNow'
 
@@ -14,7 +15,9 @@ export function ShopList() {
   const type = params.get('type')
   const group = params.get('group')
   const [text, setText] = useState(params.get('q') ?? '')
-  const q = useDebounced(text.trim(), 300)
+  // 1 or 2 letters aren't sent (the backend refuses them): the whole list stays, with a hint
+  const typed = searchable(text)
+  const q = useDebounced(typed.q, 300)
   const ok = isShopType(type) && isGroup(group)
   const list = useShopList(ok ? type : 'KIRANA', ok ? group : 'FIRST_VISIT', q)
   const now = useNow(60_000)
@@ -75,6 +78,7 @@ export function ShopList() {
           inputMode="search"
           autoComplete="off"
           placeholder="#1042, name, owner or phone"
+          hint={typed.tooShort ? 'Type at least 3 letters (or a shop number like #42).' : undefined}
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -86,6 +90,9 @@ export function ShopList() {
       )}
       {list.isPending ? (
         <Loading />
+      ) : list.isError && !list.data && fieldError(list.error, 'q') ? (
+        // The backend still refused the search (its count of letters differs): say what to do, not "try again"
+        <EmptyState title="Type at least 3 letters" body="Or search a shop number like #42, or 3 digits of the owner's phone." />
       ) : list.isError && !list.data ? (
         <ErrorState message={explain(list.error)} onRetry={() => void list.refetch()} />
       ) : (
