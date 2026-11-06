@@ -1,4 +1,4 @@
-import { ADMIN_MESSAGES, ApiError, explain, fieldError, isNetwork, phoneError, wrongStatusText } from './errors'
+import { ADMIN_MESSAGES, ApiError, explain, fieldError, isNetwork, phoneError, retryDelay, wrongStatusText } from './errors'
 
 const err = (status: number, code: string, message = 'backend words', details: Record<string, unknown> = {}) =>
   new ApiError(status, { code, message, details })
@@ -40,5 +40,20 @@ describe('error explanations', () => {
     expect(explain(err(500, 'SERVICE_BUSY', 'Try again in a few seconds.'))).toBe('Try again in a few seconds.')
     expect(explain(ApiError.network())).toMatch(/offline/)
     expect(explain(new Error('x'))).toBe('Something went wrong. Please try again.')
+  })
+})
+
+describe('retry delay', () => {
+  it("waits as long as the backend's Retry-After asks (at most 30 s), else 1 s, 2 s, 4 s…", () => {
+    expect(retryDelay(0, new ApiError(503, { code: 'SERVICE_BUSY' }, 5))).toBe(5000)
+    expect(retryDelay(0, new ApiError(503, { code: 'SERVICE_BUSY' }, 600))).toBe(30_000)
+    expect(retryDelay(0, ApiError.network())).toBe(1000)
+    expect(retryDelay(2, new Error('x'))).toBe(4000)
+  })
+
+  it('spells out a refused search', () => {
+    expect(explain(err(400, 'VALIDATION_FAILED', 'Some fields are not valid', { q: 'type at least 3 letters' }))).toBe(
+      'The search: type at least 3 letters.',
+    )
   })
 })

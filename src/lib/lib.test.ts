@@ -10,6 +10,7 @@ import {
   codePoints,
   hasHiddenCharacters,
   lettersOrDigits,
+  searchable,
   checkStrikeReason,
   checkTestPhone,
   decisionsFor,
@@ -211,5 +212,21 @@ describe('links, phones and roles', () => {
     expect(roleOf({ id: 'u', phone: null, name: null, email: null, emailVerified: false, admin: true })).toBe('NONE')
     expect(tabsFor('ADMIN').map((t) => t.label)).toEqual(['Shops', 'Support', 'More'])
     expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Shops', 'Support', 'Team', 'Test mode', 'More'])
+  })
+})
+
+describe('search box', () => {
+  it('sends nothing for 1 or 2 letters (with a hint), a shop number at any length, 3 letters or more', () => {
+    expect(searchable('')).toEqual({ q: '', tooShort: false })
+    expect(searchable('  ')).toEqual({ q: '', tooShort: false })
+    expect(searchable('g')).toEqual({ q: '', tooShort: true })
+    expect(searchable(' gu ')).toEqual({ q: '', tooShort: true })
+    expect(searchable('7')).toEqual({ q: '7', tooShort: false })
+    expect(searchable('#42')).toEqual({ q: '#42', tooShort: false })
+    expect(searchable('#')).toEqual({ q: '', tooShort: true })
+    expect(searchable(' gup ')).toEqual({ q: 'gup', tooShort: false })
+    // Counted as the backend counts (code points): an emoji is one character, two are still too short
+    expect(searchable('😀😀')).toEqual({ q: '', tooShort: true })
+    expect(searchable('डाक')).toEqual({ q: 'डाक', tooShort: false })
   })
 })

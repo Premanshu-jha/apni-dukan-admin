@@ -30,6 +30,8 @@ export interface Call {
   path: string
   body: unknown
   auth: string | null
+  /** When it arrived (ms), to check the waits between retries. */
+  at: number
 }
 
 /** The parts of a shop's page that are not the AdminShop itself. */
@@ -76,6 +78,20 @@ const PHONE = /^[6-9]\d{9}$/
 
 /** Shops a list page returns (ShopReviewStore.PAGE). */
 const SHOPS_PAGE = 50
+/** Timeline entries per page (ShopReviewStore.TIMELINE_PAGE): the shop page's first, then .../timeline. */
+const TIMELINE_PAGE = 50
+
+/**
+ * An instant's microseconds since 1970, from the backend's text ("…T04:30:00.123456Z"): the backend orders and
+ * pages by the microsecond, so the fake does too (a JavaScript Date keeps only milliseconds).
+ */
+export function micros(instant: string): number {
+  const fraction = (instant.match(/\.(\d+)Z$/)?.[1] ?? '').padEnd(6, '0').slice(0, 6)
+  return Math.floor(Date.parse(instant) / 1000) * 1_000_000 + Number(fraction)
+}
+
+/** What Spring can read as an Instant query value (ISO-8601, in UTC). */
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?Z$/
 
 /** An ETag as Spring's ShallowEtagHeaderFilter makes it: "0" and the MD5 of the body, in quotes. */
 export function etagOf(body: string): string {
@@ -116,6 +132,16 @@ export class MockApi {
   signedInAsTestAccount = false
   /** How many next-page requests of a shop list fail with 500 (the pages already shown must stay). */
   failShopPages = 0
+  /** How many earlier-timeline requests fail with 500 (the entries already shown must stay). */
+  failTimelinePages = 0
+  /** Paths (by suffix) answered 503 SERVICE_BUSY with Retry-After this many times. */
+  busy = new Map<string, { times: number; retryAfter: number }>()
+  /**
+   * Each timeline entry's seq (shop_events.seq: the order entries were made, for ties in `at`). Kept beside the
+   * entries, not in them: the backend's TimelineEntry has no seq, only the page cursors do.
+   */
+  private seqOf = new WeakMap<Json, number>()
+  private lastSeq = 0
   /** Paths (with the query) answered 304 Not Modified, in order. */
   notModified: string[] = []
   /** Next answer of a path (by suffix): a code + status, once. */
@@ -301,12 +327,12 @@ export class MockApi {
     const raw = req.postData()
     const body = raw ? JSON.parse(raw) : undefined
     const auth = req.headers()['authorization'] ?? null
-    this.calls.push({ method, path: url.pathname + url.search, body, auth })
+    this.calls.push({ method, path: url.pathname + url.search, body, auth, at: Date.now() })
     const p = url.pathname.replace(P, '')
     for (const [suffix, ms] of this.slow) if (p.endsWith(suffix)) await new Promise((r) => setTimeout(r, ms))
     const lost = [...this.loseAnswer].find((suffix) => p.endsWith(suffix))
     if (lost) this.loseAnswer.delete(lost)
-    const ok = (status: number, json?: unknown) => {
+    const ok = (status: number, json?: unknown, extra: Record<string, string> = {}) => {
       if (lost) return route.abort('timedout')
       const text = json === undefined ? '' : JSON.stringify(json)
       // Every successful GET carries an ETag; sent back unchanged as If-None-Match, the answer is 304 with no body
@@ -317,7 +343,7 @@ export class MockApi {
       }
       return route.fulfill({
         status,
-        headers: { ...this.cors(), 'Content-Type': 'application/json', ...(etag ? { ETag: etag } : {}) },
+        headers: { ...this.cors(), 'Content-Type': 'application/json', ...(etag ? { ETag: etag } : {}), ...extra },
         body: text,
       })
     }
@@ -352,6 +378,13 @@ export class MockApi {
     const tokenRole = this.access.get(token)
     if (tokenRole === undefined) return fail(401, 'TOKEN_EXPIRED', 'Your session has expired. Refresh it.')
 
+    // 503 SERVICE_BUSY with Retry-After, as GlobalExceptionHandler answers a statement past its time limit
+    for (const [suffix, b] of this.busy) {
+      if (p.endsWith(suffix) && b.times > 0) {
+        b.times -= 1
+        return ok(503, { code: 'SERVICE_BUSY', message: "We're having a short problem. Try again in a few seconds.", details: {} }, { 'Retry-After': String(b.retryAfter) })
+      }
+    }
     for (const [suffix, f] of this.failOnce) {
       if (p.endsWith(suffix)) {
         this.failOnce.delete(suffix)
@@ -404,12 +437,14 @@ export class MockApi {
     }
 
     if (p === '/admin/shops' && method === 'GET') {
-      const type = url.searchParams.get('type')
-      const group = url.searchParams.get('group')
-      const details: Json = {}
-      if (type !== 'KIRANA' && type !== 'SALON') details.type = 'must be KIRANA or SALON'
-      if (!['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED'].includes(group ?? '')) details.group = 'is required'
-      if (Object.keys(details).length) return invalid(details)
+      // Spring reads every value first: a type or group it doesn't know is 400 BAD_REQUEST with the allowed values
+      // (handleTypeMismatch); then the controller wants both (VALIDATION_FAILED naming each missing one)
+      const type = url.searchParams.get('type') || null
+      const group = url.searchParams.get('group') || null
+      const TYPES = ['KIRANA', 'SALON']
+      const GROUPS = ['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED']
+      if (type !== null && !TYPES.includes(type)) return fail(400, 'BAD_REQUEST', `'${type}' is not a valid value for 'type'`, { allowed: TYPES })
+      if (group !== null && !GROUPS.includes(group)) return fail(400, 'BAD_REQUEST', `'${group}' is not a valid value for 'group'`, { allowed: GROUPS })
       // The next page: after the last shop's statusSince and id (ShopAdminController). Spring reads the values first:
       // one that isn't an instant or an id (this fake's ids stand in for the backend's UUIDs) is 400 BAD_REQUEST from
       // GlobalExceptionHandler.handleTypeMismatch; an empty one counts as not sent. Then half a cursor is
@@ -421,7 +456,14 @@ export class MockApi {
         return unreadable(afterSince, 'afterSince')
       }
       if (afterId !== null && !/^shop\d+$/.test(afterId)) return unreadable(afterId, 'afterId')
+      const missing: Json = {}
+      if (type === null) missing.type = 'is required'
+      if (group === null) missing.group = 'is required'
+      if (Object.keys(missing).length) return invalid(missing)
       if ((afterSince === null) !== (afterId === null)) return invalid({ afterId: 'send afterSince and afterId together' })
+      // ShopAdminService.requireSearchable: 1 or 2 characters (code points) that aren't a shop number are refused
+      const typed = (url.searchParams.get('q') ?? '').trim()
+      if (typed && [...typed].length < 3 && !/^#?\d+$/.test(typed)) return invalid({ q: 'type at least 3 letters' })
       if (afterId !== null && this.failShopPages > 0) {
         this.failShopPages -= 1
         return fail(500, 'INTERNAL_ERROR', 'Something went wrong on our side.')
@@ -446,6 +488,26 @@ export class MockApi {
       return ok(200, list.map((x) => this.view(x.s)))
     }
 
+    const timelinePath = p.match(/^\/admin\/shops\/([^/]+)\/timeline$/)
+    if (timelinePath && method === 'GET') {
+      // Spring reads the values first: a time that isn't an instant or a seq that isn't a number is 400 BAD_REQUEST
+      // (handleTypeMismatch; an empty one counts as not sent); then one without the other is VALIDATION_FAILED naming
+      // afterSeq; then 404 for a shop that doesn't exist
+      const afterAt = url.searchParams.get('afterAt') || null
+      const afterSeq = url.searchParams.get('afterSeq') || null
+      const unreadable = (value: string, name: string) => fail(400, 'BAD_REQUEST', `'${value}' is not a valid value for '${name}'`)
+      if (afterAt !== null && (!INSTANT.test(afterAt) || Number.isNaN(Date.parse(afterAt)))) return unreadable(afterAt, 'afterAt')
+      if (afterSeq !== null && !/^-?\d+$/.test(afterSeq)) return unreadable(afterSeq, 'afterSeq')
+      if ((afterAt === null) !== (afterSeq === null)) return invalid({ afterSeq: 'send afterAt and afterSeq together' })
+      const shop = this.shops.find((s) => s.id === timelinePath[1])
+      if (!shop) return fail(404, 'NOT_FOUND', 'No such shop.')
+      if (afterAt !== null && this.failTimelinePages > 0) {
+        this.failTimelinePages -= 1
+        return fail(500, 'INTERNAL_ERROR', 'Something went wrong on our side.')
+      }
+      return ok(200, this.timelinePage(shop.id as string, afterAt === null ? null : { at: micros(afterAt), seq: Number(afterSeq) }))
+    }
+
     const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|notes))?$/)
     if (shopPath) {
       const shop = this.shops.find((s) => s.id === shopPath[1])
@@ -453,6 +515,8 @@ export class MockApi {
       const x = this.extra.get(shop.id as string)!
       const action = shopPath[2]
       if (!action && method === 'GET') {
+        // The first 50, and where the next 50 start (null when there are no more)
+        const first = this.timelinePage(shop.id as string, null)
         return ok(200, {
           shop: this.view(shop),
           salon: x.salon,
@@ -460,7 +524,8 @@ export class MockApi {
           pinMovedMetres: x.pinMovedMetres,
           previousOwnerPhotoUrl: x.previousOwnerPhotoUrl,
           previousShopPhotoUrl: x.previousShopPhotoUrl,
-          timeline: x.timeline,
+          timeline: first.items,
+          timelineNext: first.next,
         })
       }
       const note = typeof body?.note === 'string' ? cleanText(body.note) : ''
@@ -606,6 +671,24 @@ export class MockApi {
     }
 
     return fail(404, 'NOT_FOUND', `No route ${method} ${p}`)
+  }
+
+  /**
+   * A page of a shop's timeline as ShopReviewStore.timeline: `at` descending, then seq descending (the newest made
+   * first), everything before the cursor, 50 at most; `next` is the last entry's at and seq when there are more.
+   */
+  private timelinePage(shopId: string, after: { at: number; seq: number } | null): { items: Json[]; next: Json | null } {
+    const timeline = this.extra.get(shopId)!.timeline
+    // Entries get their seq in the order they were made: the list is newest first, so from its end
+    for (let i = timeline.length - 1; i >= 0; i--) if (!this.seqOf.has(timeline[i])) this.seqOf.set(timeline[i], ++this.lastSeq)
+    const seq = (e: Json) => this.seqOf.get(e)!
+    const at = (e: Json) => micros(e.at as string)
+    const rest = [...timeline]
+      .sort((x, y) => at(y) - at(x) || seq(y) - seq(x))
+      .filter((e) => after === null || at(e) < after.at || (at(e) === after.at && seq(e) < after.seq))
+    const items = rest.slice(0, TIMELINE_PAGE)
+    const last = items[items.length - 1]
+    return { items, next: rest.length > TIMELINE_PAGE ? { afterAt: last.at, afterSeq: seq(last) } : null }
   }
 
   private cors() {
