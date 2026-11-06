@@ -136,7 +136,23 @@ export interface ShopDetail {
   pinMovedMetres: number | null
   previousOwnerPhotoUrl: string | null
   previousShopPhotoUrl: string | null
+  /** Newest first, the first 50 entries. */
   timeline: TimelineEntry[]
+  /** Where the next 50 start (GET /admin/shops/{id}/timeline with these); null when there are no more. */
+  timelineNext: TimelineNext | null
+}
+
+/** A timeline page's end, sent back exactly as received as `afterAt` and `afterSeq`. */
+export interface TimelineNext {
+  afterAt: string
+  /** The order of entries made in the same instant (a database sequence: well inside a safe JavaScript number). */
+  afterSeq: number
+}
+
+/** GET /admin/shops/{id}/timeline: the entries after a cursor, newest first, 50 a page. */
+export interface TimelinePage {
+  items: TimelineEntry[]
+  next: TimelineNext | null
 }
 
 export interface DecisionIn {
