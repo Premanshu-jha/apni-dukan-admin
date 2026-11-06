@@ -163,6 +163,21 @@ and a photo whose link ran out says so.
 `src/features/auth/*` are copies of the partner app's, with this site's storage keys (`ada.*`) and wording. A fix in
 one should go to the others until a shared package is worth it.
 
+### Long timelines and the search box
+
+A shop's page shows the first 50 timeline entries; "Show earlier entries" asks `GET /admin/shops/{id}/timeline` with
+the page's `timelineNext` (then each answer's `next`), exactly as received, 50 at a time, as the shop list's "Show
+more shops" does (failed or offline taps keep what is shown, focus moves to the first new entry, `aria-busy`). The
+earlier entries are kept under their own key, the shop page's `timelineNext`: refreshing the shop page doesn't ask them
+again (old entries don't change), and when a note or decision pushes the first 50 down, `timelineNext` changes and the
+earlier entries are asked again right after the new first 50, as many pages as the admin had loaded; the timeline as
+it was stays on screen until they are in (nothing drops or jumps, nothing missing or twice). Entries far off screen aren't
+drawn (`content-visibility`).
+
+The search box sends nothing for 1 or 2 letters that aren't a shop number ("7" and "#42" are fine at any length): the
+backend refuses those (they match most shops), so the whole list stays with the hint "Type at least 3 letters". If
+the backend refuses one anyway, the list says the same instead of "Try again".
+
 ### Where the contract left something open
 
 - **403 code from the security config.** Not named in the contract; the fake uses `FORBIDDEN`. The app looks only at
@@ -195,6 +210,21 @@ set `VITE_API_URL` (and `VITE_TURNSTILE_SITE_KEY` in production). All routes mus
 needs the network.
 
 ## Changelog
+
+### 0.3.0 — 2026-11-06
+
+Uses the backend's scale PR (apni-dukan-backend#33, "Pages (the exact contract)"; merge that first):
+
+- Shop page: the first 50 timeline entries, then "Show earlier entries" (50 at a time from `timelineNext` / `next`);
+  a failed or offline tap keeps what is shown and says so; focus moves to the first new entry; `aria-busy`. A new
+  entry meanwhile re-asks as many earlier pages as were loaded, keeping the old ones on screen until then.
+- Search: 1 or 2 letters (not a shop number) aren't sent; the box says "Type at least 3 letters (or a shop number
+  like #42)". A 400 `{q}` from the backend says the same instead of "Try again".
+- A failed read is retried after the backend's `Retry-After` (503 SERVICE_BUSY: 5 s), not after 1 s.
+- Tests: the fake backend pages the timeline (at, then seq, to the microsecond), refuses half or unreadable timeline
+  cursors, requires `type` and `group` (unknown values 400 BAD_REQUEST) and refuses short searches like the real one;
+  end-to-end journeys for a long timeline with ties, exactly 50 and 51, a failed and an offline tap, a note while
+  earlier entries are shown, the search hint and a refused search; unit tests of the search rule and the retry delay.
 
 ### 0.2.0 — 2026-11-06
 
