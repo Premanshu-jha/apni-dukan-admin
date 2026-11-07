@@ -22,7 +22,7 @@ const RESULT: Record<Decision, ShopStatus> = {
 }
 
 const DONE_TEXT: Record<Decision, string> = {
-  approve: 'Approved. The shop is live now.',
+  approve: 'Approved. The business is live now.',
   reject: 'Sent back to the owner with your reason.',
   suspend: 'Suspended. The owner sees your reason.',
   reinstate: 'Reinstated. It now waits for a re-check visit.',
@@ -44,12 +44,12 @@ export function ShopDetail() {
   const [warning, setWarning] = useState<string | null>(null)
   const [reloading, setReloading] = useState(false)
 
-  if (detail.isPending) return <Page title="Shop" back><Loading /></Page>
+  if (detail.isPending) return <Page title="Business" back><Loading /></Page>
   if (detail.isError && !detail.data) {
     return (
-      <Page title="Shop" back="/">
+      <Page title="Business" back="/">
         {isApiError(detail.error, 'NOT_FOUND') ? (
-          <EmptyState title="No such shop" body="It may have been removed, or the link is wrong." />
+          <EmptyState title="No such business" body="It may have been removed, or the link is wrong." />
         ) : (
           <ErrorState message={explain(detail.error)} onRetry={() => void detail.refetch()} />
         )}
@@ -187,7 +187,7 @@ export function ShopDetail() {
       <section aria-labelledby="photos" className="flex flex-col gap-2">
         <h2 id="photos" className="font-semibold">Photos</h2>
         <div className="grid grid-cols-2 gap-2">
-          <Photo url={shop.shopPhotoUrl} label="Shop photo" />
+          <Photo url={shop.shopPhotoUrl} label="Front photo" />
           <Photo url={shop.ownerPhotoUrl} label="Owner photo" />
         </div>
       </section>
@@ -392,7 +392,7 @@ function WhatChanged({ detail }: { detail: Detail }) {
 function ChangeRow({ change, detail, shop }: { change: Change; detail: Detail; shop: AdminShop }) {
   if (change.field === 'ownerPhoto' || change.field === 'shopPhoto') {
     const owner = change.field === 'ownerPhoto'
-    const what = owner ? 'owner photo' : 'shop photo'
+    const what = owner ? 'owner photo' : 'front photo'
     return (
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium">{change.label}</p>

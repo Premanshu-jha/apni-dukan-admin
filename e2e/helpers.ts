@@ -42,7 +42,7 @@ export async function signedIn(context: BrowserContext, api: MockApi, role: Admi
 export async function atDashboard(page: Page, context: BrowserContext, api: MockApi, role: AdminRole = 'ADMIN') {
   await signedIn(context, api, role)
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
 }
 
 /** "6:30 PM" for an instant in India time, as the app writes it. */

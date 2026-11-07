@@ -55,5 +55,5 @@ test('opened without a connection: the offline page, and "Try again" opens the a
 
   await context.setOffline(false)
   await page.getByRole('link', { name: 'Try again' }).click()
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
 })

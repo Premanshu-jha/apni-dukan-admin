@@ -23,7 +23,7 @@ export interface Tab {
 /** The bottom bar: Team and Test mode only for the super admin. */
 export function tabsFor(role: AdminRole): Tab[] {
   return [
-    { to: '/', label: 'Shops', icon: '▦' },
+    { to: '/', label: 'Businesses', icon: '▦' },
     { to: '/support', label: 'Support', icon: '☏' },
     ...(isSuperAdmin(role)
       ? [

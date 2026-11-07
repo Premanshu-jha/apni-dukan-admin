@@ -33,10 +33,10 @@ export const EMPTY_DRAFT: Draft = { checklist: [], reason: '', reasonEdited: fal
 export type Conflict = 'SHOP_CHANGED' | 'WRONG_STATUS'
 
 const CONFIRM_TEXT: Record<Decision, string> = {
-  approve: 'The shop goes live: customers can find it.',
-  reinstate: 'The shop comes back for a visit: it waits in "Re-check after edit" until someone approves it.',
+  approve: 'The business goes live: customers can find it.',
+  reinstate: 'The business comes back for a visit: it waits in "Re-check after edit" until someone approves it.',
   reject: 'The owner gets it back to fix, with your reason.',
-  suspend: 'The shop disappears for customers. The owner sees your reason.',
+  suspend: 'The business disappears for customers. The owner sees your reason.',
 }
 
 /**

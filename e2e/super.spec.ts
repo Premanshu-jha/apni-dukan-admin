@@ -3,10 +3,10 @@ import { atDashboard, expect, istTime, signedIn, test } from './helpers'
 test('an ordinary admin has no Team or Test mode, and their addresses go to the dashboard', async ({ page, context, api }) => {
   await atDashboard(page, context, api, 'ADMIN')
   const nav = page.getByRole('navigation', { name: 'Main' })
-  await expect(nav.getByRole('link')).toHaveText(['Shops', 'Support', 'More'].map((t) => new RegExp(t)))
+  await expect(nav.getByRole('link')).toHaveText(['Businesses', 'Support', 'More'].map((t) => new RegExp(t)))
   for (const path of ['/team', '/test-mode']) {
     await page.goto(path)
-    await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
     await expect(page).toHaveURL(/\/$/)
   }
   expect(api.calls.some((c) => c.path.startsWith('/api/v1/admin/team') || c.path.startsWith('/api/v1/admin/test-mode'))).toBe(false)
@@ -18,7 +18,7 @@ test('a super admin made an ordinary admin meanwhile is sent out of Team (403 SU
   await expect(page.getByRole('link', { name: 'Team' })).toBeVisible()
   api.setRole('ADMIN')
   await page.getByRole('link', { name: 'Team' }).click()
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Team' })).toBeHidden()
 })
 
@@ -30,7 +30,7 @@ test('a write refused with 403 SUPER_ADMIN_ONLY re-reads /admin/me at once and t
   const meBefore = api.calledTimes('GET', '/api/v1/admin/me')
   await page.getByLabel('Add an admin by mobile number').fill('9000000055')
   await page.getByRole('button', { name: 'Add to the team' }).click()
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(meBefore)
   await expect(page.getByRole('link', { name: 'Team' })).toBeHidden()
 })
@@ -141,10 +141,10 @@ test('test numbers: add with a label, the refusals in words, remove', async ({ p
   await page.getByLabel('Test number', { exact: true }).fill('9000000099')
   await page.getByRole('button', { name: 'Add test number' }).click()
   await expect(page.getByText('This number is already a test number.')).toBeVisible()
-  // A number with a real account (a customer or a shop)
+  // A number with a real account (a customer or a business)
   await page.getByLabel('Test number', { exact: true }).fill('9811122233')
   await page.getByRole('button', { name: 'Add test number' }).click()
-  await expect(page.getByText('That number already has a real account (a customer or a shop). Use a number nobody has signed in with.')).toBeVisible()
+  await expect(page.getByText('That number already has a real account (a customer or a business). Use a number nobody has signed in with.')).toBeVisible()
   // The label follows the text rule
   await page.getByLabel('Test number', { exact: true }).fill('9000000088')
   await page.getByLabel('Whose number').fill('#')

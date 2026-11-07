@@ -81,7 +81,7 @@ export const CHECKLIST_LABELS: Record<ChecklistItem, string> = {
   PIN_WRONG: 'Pin is in the wrong place',
   ADDRESS_MISMATCH: "Address doesn't match",
   GST_UDYAM_MISMATCH: "GSTIN / Udyam doesn't match",
-  SHOP_SHUT: 'Shop was shut',
+  SHOP_SHUT: 'Business was shut',
   OTHER: 'Other',
 }
 

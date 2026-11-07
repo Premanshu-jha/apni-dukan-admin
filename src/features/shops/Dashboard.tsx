@@ -14,9 +14,9 @@ export function Dashboard() {
   const board = useDashboard()
 
   return (
-    <Page title="Shops">
+    <Page title="Businesses">
       <Tabs
-        label="Shop type"
+        label="Business type"
         value={type}
         options={SHOP_TYPES.map((t) => ({ value: t, label: TYPE_LABELS[t] }))}
         onChange={(t) => setParams({ type: t }, { replace: true })}
@@ -28,7 +28,7 @@ export function Dashboard() {
       ) : (
         <>
           {board.isError && <Banner tone="warn">Couldn't refresh the counts: {explain(board.error)}</Banner>}
-          <ul className="flex flex-col gap-2" aria-label={`${TYPE_LABELS[type]} shops by group`}>
+          <ul className="flex flex-col gap-2" aria-label={`${TYPE_LABELS[type]} businesses by group`}>
             {GROUPS.map((g) => {
               const count = board.data[type]?.[g] ?? 0
               return (

@@ -5,9 +5,9 @@ const err = (status: number, code: string, message = 'backend words', details: R
 
 describe('error explanations', () => {
   it('uses the agreed words for every admin refusal in the contract', () => {
-    expect(explain(err(409, 'SHOP_CHANGED'))).toBe('This shop changed since you opened it (the owner or another admin). Reload and check again.')
-    expect(explain(err(409, 'REAL_ACCOUNT'))).toBe('That number already has a real account (a customer or a shop). Use a number nobody has signed in with.')
-    expect(explain(err(403, 'OWN_SHOP'))).toMatch(/^You work in this shop .* Ask another admin\.$/)
+    expect(explain(err(409, 'SHOP_CHANGED'))).toBe('This business changed since you opened it (the owner or another admin). Reload and check again.')
+    expect(explain(err(409, 'REAL_ACCOUNT'))).toBe('That number already has a real account (a customer or a business). Use a number nobody has signed in with.')
+    expect(explain(err(403, 'OWN_SHOP'))).toMatch(/^You work in this business .* Ask another admin\.$/)
     expect(wrongStatusText(new ApiError(409, { code: 'WRONG_STATUS', details: { status: 'CLOSED' } }))).toBe(
       'Someone else decided meanwhile: it is now Closed by the owner.',
     )

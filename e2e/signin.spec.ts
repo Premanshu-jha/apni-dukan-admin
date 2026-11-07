@@ -17,7 +17,7 @@ test('an admin signs in with phone and code and lands on the dashboard', async (
   // The wrong code is really cleared, so the next one is typed into an empty box
   await expect(page.getByLabel('Code')).toHaveValue('')
   await page.getByLabel('Code').pressSequentially('123456')
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   expect(api.calls.find((c) => c.path === '/api/v1/auth/otp/send')?.body).toMatchObject({ phone: '9848012345' })
   expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(0)
 })
@@ -49,7 +49,7 @@ test('someone added to the team while on the "not for you" screen gets in with C
   await expect(page.getByText('This number is still not on the team.')).toBeVisible()
   api.setRole('ADMIN')
   await page.getByRole('button', { name: 'Check again' }).click()
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
 })
 
 test('a new admin without a verified email does the email and name steps first', async ({ page, api }) => {
@@ -65,7 +65,7 @@ test('a new admin without a verified email does the email and name steps first',
   await expect(page.getByRole('heading', { name: 'What should we call you?' })).toBeVisible()
   await page.getByLabel('Your name').fill('Asha')
   await page.getByRole('button', { name: 'Done' }).click()
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
 })
 
 test('recovery with email: codes to the email and the new number, then in', async ({ page, api }) => {
@@ -81,7 +81,7 @@ test('recovery with email: codes to the email and the new number, then in', asyn
   await expect(page.getByText('A code is not right.')).toBeVisible()
   await page.getByLabel('Email code').fill('654321')
   await page.getByRole('button', { name: 'Recover account' }).click()
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   expect(api.calls.find((c) => c.path === '/api/v1/auth/recover/complete')?.body).toMatchObject({ email: 'asha@example.com', newPhone: '9848012345' })
 })
 
@@ -173,7 +173,7 @@ async function signInAgainWithListFailing(page: Page, api: MockApi) {
   await page.getByLabel('Mobile number').fill('9848012345')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByLabel('Code').fill('123456')
-  await expect(page.getByRole('heading', { name: 'Shops' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   api.failOnce.set('/admin/shops', { status: 400, code: 'BAD', message: 'The list could not be read.' })
   await page.getByRole('link', { name: /Waiting for first visit/ }).click()
   await expect(page.getByText('The list could not be read.')).toBeVisible()
