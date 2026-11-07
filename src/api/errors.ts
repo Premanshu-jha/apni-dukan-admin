@@ -38,6 +38,8 @@ export function isApiError(e: unknown, code?: string): e is ApiError {
 
 /** The words to show a person for any error. The backend's messages are already written for people. */
 export function messageOf(e: unknown): string {
+  // 429 TRY_LATER (sign-in codes): this network has to wait before the next try; Retry-After says how long
+  if (e instanceof ApiError && e.code === 'TRY_LATER') return tryLaterText(e.retryAfterSeconds)
   if (e instanceof ApiError) return e.message
   return 'Something went wrong. Please try again.'
 }
@@ -66,6 +68,8 @@ export const ADMIN_MESSAGES: Record<string, string> = {
   STRIKE_NOT_FOUND: 'This strike was already removed, maybe by someone else. The list now shows what is left.',
   INVALID_PHONE: "That isn't a valid mobile number. Check the 10 digits.",
   SUPER_ADMIN_ONLY: 'Only the super admin can do this.',
+  OWN_SHOP:
+    "You work in this shop (as its owner, a helper or a barber), so you can't decide on it or write notes about it. Ask another admin.",
 }
 
 /** 409 WRONG_STATUS: "Someone else decided meanwhile: it is now Live." (details.status = the status now). */
@@ -113,4 +117,10 @@ const FIELD_NAMES: Record<string, string> = {
   hours: 'The hours',
   name: 'The name',
   q: 'The search:',
+}
+
+/** "Too many tries from this network. Try again in 4 minutes." (from Retry-After; at least a minute). */
+export function tryLaterText(seconds: number | null): string {
+  const minutes = Math.max(1, Math.ceil((seconds ?? 60) / 60))
+  return `Too many tries from this network. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`
 }

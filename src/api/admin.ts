@@ -35,7 +35,8 @@ async function write<T>(method: string, path: string, body?: unknown): Promise<T
   try {
     return await api<T>(method, path, body === undefined ? {} : { body })
   } catch (e) {
-    if (e instanceof ApiError && (e.status === 403 || e.status === 404)) onRoleDoubt()
+    // OWN_SHOP is about this shop, not this person's role: nothing to re-read
+    if (e instanceof ApiError && (e.status === 403 || e.status === 404) && e.code !== 'OWN_SHOP') onRoleDoubt()
     throw e
   }
 }

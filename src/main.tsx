@@ -7,7 +7,9 @@ import { refreshSession, whenSessionEnds } from './api/client'
 import { ApiError, retryDelay } from './api/errors'
 import { App } from './app/App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { UpdatePrompt } from './components/UpdatePrompt'
 import { forgetThisPerson } from './features/auth/signOut'
+import { registerWorker } from './lib/swUpdate'
 import { followOtherTabs, useSession } from './store/session'
 import './index.css'
 
@@ -55,6 +57,7 @@ async function start() {
     // A network blip at start keeps the saved user; the next call tries the refresh again.
     if (!ok && useSession.getState().refreshToken) useSession.setState({ status: 'signedIn' })
   }
+  void registerWorker()
 }
 
 void start()
@@ -66,6 +69,7 @@ createRoot(document.getElementById('root')!).render(
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
+        <UpdatePrompt />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,
