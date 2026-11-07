@@ -44,10 +44,12 @@ backend.
 | `npx playwright install chromium` | Once: the browser for the end-to-end tests |
 | `npm run e2e` | End-to-end tests (Playwright): a real browser drives the app against a fake backend |
 | `npm run build` | Type-check and production build into `dist/` |
+| `npm run icons` | Make the PNG icons from `public/icon.svg` (commit them) |
 
 CI (`.github/workflows/ci.yml`) runs type-check, lint, unit tests, build, the end-to-end tests (on Ubuntu 24.04:
-Playwright has no Chromium for `ubuntu-latest` yet) and a gitleaks secret scan on every pull request and on pushes
-to `main` and `feature/**`.
+Playwright has no Chromium for `ubuntu-latest` yet), the security-headers check (Caddy), `npm audit` (high and
+critical) and a gitleaks secret scan on every pull request and on pushes to `main` and `feature/**`. Dependabot
+proposes npm and GitHub Actions updates weekly.
 
 ### Tests
 
@@ -73,7 +75,7 @@ reviews walk the list against the code.
 | --- | --- | --- |
 | Sign in, code, recovery | `/signin`, `/signin/code`, `/signin/recover` | Everyone |
 | Email and name steps | `/welcome/email`, `/welcome/name` | Admins who haven't given them yet |
-| Dashboard: Kirana / Salon, five counts | `/?type=SALON` | Admins |
+| Dashboard: Kirana / Salon, six counts | `/?type=SALON` | Admins |
 | Shop list for a type and group, with search, 50 at a time ("Show more shops") | `/shops?type=KIRANA&group=FIRST_VISIT&q=` | Admins |
 | Shop page: what changed, photos, details, Navigate, Call owner, timeline, decisions | `/shops/:id` | Admins |
 | Support: a customer's strikes | `/support` | Admins |
@@ -111,7 +113,11 @@ flowchart LR
   RC -- "Send back / Suspend" --> SB
   L -- "Suspend (reason)" --> SU
   SU -- "Reinstate" --> RC
+  L & FV & SB & SU -- "owner closes it (for good)" --> CL["CLOSED: Closed by the owner"]
 ```
+
+A closed shop is never opened again (its owner registers a new one): no decision applies to it (the backend answers
+409 `WRONG_STATUS`), only notes. A hand-over to a new owner doesn't move the shop; its timeline says "Handed over to …".
 
 ## How it works
 
@@ -194,22 +200,70 @@ once and says what it is now. A decision whose answer is lost re-reads the shop:
 decision, that is a success; otherwise the form stays, with the offline message. Every admin write goes through one
 path in `api/admin.ts` that re-reads `/admin/me` on 403 or 404.
 
-### Content-Security-Policy
+### Security headers
 
-`index.html` carries a CSP meta tag: scripts only from this site and Cloudflare Turnstile, frames only from
-Turnstile, API calls over https (plus `localhost` and the e2e fake), images from https. The dev server leaves it out
-(hot reload needs inline scripts); the build and the end-to-end tests keep it, and every end-to-end test fails if the
-policy blocks anything.
+`security-headers.ts` works them out from the build's variables; the build writes them to
+`dist/security-headers.caddy`, which the `Caddyfile` imports (real response headers; the `<meta>` CSP is gone), and
+`vite preview` (the end-to-end tests) sends the same. The dev server sends none (hot reload needs inline scripts).
+
+| Header | Value |
+| --- | --- |
+| `Content-Security-Policy` | `default-src 'self'`; scripts from the site (plus `https://challenges.cloudflare.com` when the Turnstile key is set, also its frame); API calls only to `VITE_API_URL` (was any https address); images from the site, `data:`, `blob:` and `PHOTO_ORIGIN` (was any https address); styles allow inline (the Turnstile widget); no plugins; `frame-ancestors 'none'` |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Permissions-Policy` | everything off (`geolocation=()`, camera, microphone, payment, …): directions open Google Maps |
+
+Every end-to-end test fails if the policy blocks anything. CI's `headers` job builds as for production, starts Caddy
+with the `Caddyfile` (the build at `/app/dist`, as on Railway) and checks every header on the app, a deep link,
+`sw.js`, the manifest and the offline page (`scripts/check-headers.mjs`).
+
+### Installing and offline
+
+`public/manifest.webmanifest` ("Apni Dukan Admin", short "AD Admin") lists the SVG icon and PNGs (192, 512,
+maskable 512) plus `apple-touch-icon.png` for iPhone, all made from `public/icon.svg` by `npm run icons` (sharp);
+commit the PNGs after changing the SVG. `public/sw.js` only keeps a small offline page (`offline.html`, its CSS and
+the icon): opening the app without a connection shows "You're offline" with "Try again". Nothing else is cached (the
+team always works on live data). A new version of `sw.js` waits after installing; the app shows "New version
+available — Reload" and only that button switches over. Change `OFFLINE_CACHE` in `sw.js` when the offline page
+changes.
 
 ## Deploying
 
-Any static host works (Cloudflare Pages, Vercel, Railway). Build command `npm run build`, output folder `dist`, and
-set `VITE_API_URL` (and `VITE_TURNSTILE_SITE_KEY` in production). All routes must serve `index.html`
-(`public/_redirects` does this where supported). Then add the site's address to the backend's
-`CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it. No service worker: it is not installable and
-needs the network.
+Railway (a service that builds from `main`). `railway.json` picks Railpack, which sees a Vite site (no `start`
+script), runs `npm run build` and serves `dist/` with Caddy, using this repo's `Caddyfile` instead of its default:
+every address that isn't a file gets `index.html` (single-page app), `/health` answers 200, and every answer carries
+the security headers. Keep the service's Start Command empty in Railway's settings: a start command turns Caddy (and
+the headers) off. Set `VITE_API_URL` and `VITE_TURNSTILE_SITE_KEY` as the service's variables (they are read at build
+time), optionally `PHOTO_ORIGIN` (default `https://*.r2.cloudflarestorage.com`, where signed photo links point). Then
+add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### 0.4.0 — 2026-11-07
+
+- Security headers as real response headers on Railway: a `Caddyfile` (Railpack serves the build with Caddy) with
+  CSP, HSTS, Referrer-Policy, nosniff and Permissions-Policy, worked out from the build's variables
+  (`security-headers.ts`); the CSP `<meta>` and the dev-server plugin that removed it are gone. The CSP is stricter:
+  API calls only to `VITE_API_URL`, images only from `PHOTO_ORIGIN` (R2), Turnstile only when its key is set, and
+  `frame-ancestors 'none'` (a `<meta>` CSP can't do that). CI starts Caddy and checks the headers. `railway.json`
+  picks Railpack.
+- Installable: a manifest, PNG icons (192, 512, maskable) and the iPhone icon from `icon.svg` (`npm run icons`); a
+  service worker with only an offline page (nothing else cached) and "New version available — Reload".
+- A refresh answered 409 `TRY_AGAIN` (another tab or request swapped the same token first) uses the newer token that
+  was saved and retries the call once; never a loop.
+- Dependabot (npm and GitHub Actions, weekly) and `npm audit --audit-level=high` in CI.
+- Closed shops (backend apni-dukan-backend#34): a sixth group `CLOSED`, "Closed by the owner", on the dashboard and as
+  a list ("Closed 3 days ago"); the status `CLOSED` with its label and a grey pill wherever a status shows (the shop
+  page, "it is now …" after a `WRONG_STATUS`); no decision buttons for it. Timeline entries `CLOSED` ("Closed by Ravi
+  (the owner)", with "Owner's reason:") and `HANDED_OVER` ("Handed over to …").
+- 403 `OWN_SHOP` (an admin who works in that shop) on a decision or a note: "You work in this shop (as its owner, a
+  helper or a barber), so you can't decide on it or write notes about it. Ask another admin." in the form; it doesn't
+  re-read `/admin/me` (it isn't about this person's role).
+- Tests: the fake backend has the `CLOSED` group and status, `closeShop`, and answers `OWN_SHOP` first for shops the
+  admin works in; end-to-end the closed group and shop page, `OWN_SHOP` on a decision and a note, a hand-over entry.
+- Tests: end-to-end headers, install icons and offline page; unit tests of the service worker, the update offer and
+  the 409 refresh.
 
 ### 0.3.0 — 2026-11-06
 
@@ -256,7 +310,7 @@ pages" first):
 - Sign-in, recovery, email and name steps and the session, copied from the partner app (own storage keys `ada.*`).
   Only `adminRole` ADMIN or SUPER_ADMIN gets in; anyone else sees "This is for the Apni Dukan team" and Sign out.
 - A red banner on every screen while OTP test mode is on ("OTP test mode is on until 6:30 PM").
-- Dashboard with Kirana / Salon tabs and five counts; shop lists with search and loading, empty, error and offline
+- Dashboard with Kirana / Salon tabs and six counts; shop lists with search and loading, empty, error and offline
   states.
 - Shop page: what changed since the last approval, photos, details, Navigate, Call owner, timeline with admin-only
   notes; Approve, Send back, Suspend, Reinstate and Add note, with the checklist, reason and note checks, both 409s
