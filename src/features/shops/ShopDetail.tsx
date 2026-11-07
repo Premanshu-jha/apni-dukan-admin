@@ -1,9 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router'
-import { adminApi, keys, useShopDetail } from '../../api/admin'
-import { ADMIN_MESSAGES, explain, isApiError, wrongStatusText } from '../../api/errors'
-import type { AdminShop, Change, ShopDetail as Detail, ShopStatus, TimelineEntry } from '../../api/types'
+import { adminApi, keys, useEarlierTimeline, useShopDetail } from '../../api/admin'
+import { ADMIN_MESSAGES, explain, isApiError, isNetwork, wrongStatusText } from '../../api/errors'
+import type { AdminShop, Change, ShopDetail as Detail, ShopStatus, TimelineEntry, TimelineNext } from '../../api/types'
 import { Photo } from '../../components/Photo'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
 import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, TYPE_LABELS } from '../../lib/labels'
@@ -231,20 +231,7 @@ export function ShopDetail() {
         </Card>
       </section>
 
-      <section aria-labelledby="timeline" className="flex flex-col gap-2">
-        <h2 id="timeline" className="font-semibold">Timeline</h2>
-        {data.timeline.length === 0 ? (
-          <p className="text-sm text-muted">Nothing yet.</p>
-        ) : (
-          <ol className="flex flex-col gap-2" aria-label="Timeline, newest first">
-            {newestFirst(data.timeline).map((e, i) => (
-              <li key={`${e.at}-${i}`}>
-                <TimelineItem entry={e} />
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <Timeline id={id} first={data.timeline} next={data.timelineNext} />
 
       {current && (
         <DecisionSheet
@@ -280,6 +267,102 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
       <dt className="text-muted">{label}</dt>
       <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </>
+  )
+}
+
+/**
+ * The timeline: the shop page's first 50 entries, then "Show earlier entries" for 50 more at a time
+ * (GET /admin/shops/{id}/timeline from `timelineNext`). As the shop list's "Show more shops": an offline tap or a
+ * failed page keeps what is shown and says so; focus moves to the first new entry; `aria-busy` while loading.
+ */
+function Timeline({ id, first, next }: { id: string; first: TimelineEntry[]; next: TimelineNext | null }) {
+  const [shown, setShown] = useState(false)
+  // How many pages of earlier entries the admin asked for (each tap one more)
+  const [wanted, setWanted] = useState(0)
+  const earlier = useEarlierTimeline(id, next, shown)
+  const listRef = useRef<HTMLOListElement | null>(null)
+  // Index of the first entry the next page brings (set when "Show earlier entries" is tapped)
+  const focusIndex = useRef<number | null>(null)
+  const failed = earlier.isFetchNextPageError || (earlier.isError && !earlier.data)
+  const pages = earlier.data?.pages.length ?? 0
+  /*
+   * A note or decision pushes the first 50 down, so `timelineNext` changes and the earlier entries start again under
+   * a new key. Until that key has as many pages as the admin had loaded (or there are no more), the timeline as it
+   * was stays on screen (first 50 and earlier pages together: one consistent list, nothing missing or twice), so
+   * neither the entries nor the scroll position jump. Catch-up pages are asked one after the other below.
+   */
+  const catchingUp = shown && next !== null && !failed && pages < wanted && (pages === 0 || earlier.hasNextPage)
+  const fresh = [...newestFirst(first), ...newestFirst(earlier.data?.pages.flatMap((p) => p.items) ?? [])]
+  const lastShown = useRef<TimelineEntry[]>(fresh)
+  const entries = catchingUp && lastShown.current.length > fresh.length ? lastShown.current : fresh
+  lastShown.current = entries
+  const loaded = entries.length
+  const [offlineAt, setOfflineAt] = useState<number | null>(null)
+  const offlineTap = offlineAt !== null && offlineAt === loaded
+  const loading = earlier.isFetchingNextPage || (shown && earlier.isPending && earlier.fetchStatus === 'fetching')
+  // Not yet asked, loading, more to come, or the first earlier page failed (tapping again retries it)
+  const more = next !== null && (!shown || earlier.isPending || earlier.hasNextPage || (earlier.isError && !earlier.data))
+
+  // Catch up after the key changed: the next page, until there are as many as before
+  const { hasNextPage, isFetching, fetchNextPage } = earlier
+  useEffect(() => {
+    if (pages > 0 && pages < wanted && hasNextPage && !isFetching && !failed) void fetchNextPage()
+  }, [pages, wanted, hasNextPage, isFetching, failed, fetchNextPage])
+
+  useEffect(() => {
+    if (focusIndex.current === null || loading || catchingUp) return
+    if (loaded > focusIndex.current) listRef.current?.querySelector<HTMLElement>(`[data-index="${focusIndex.current}"]`)?.focus()
+    focusIndex.current = null
+  }, [loaded, loading, catchingUp])
+
+  function showEarlier() {
+    if (loading || catchingUp) return
+    if (!navigator.onLine) {
+      setOfflineAt(loaded)
+      return
+    }
+    setOfflineAt(null)
+    focusIndex.current = loaded
+    setWanted(pages + 1)
+    if (!shown) setShown(true)
+    else if (earlier.isError && !earlier.data) void earlier.refetch()
+    else void earlier.fetchNextPage()
+  }
+
+  return (
+    <section aria-labelledby="timeline" className="flex flex-col gap-2">
+      <h2 id="timeline" className="font-semibold">Timeline</h2>
+      {entries.length === 0 ? (
+        <p className="text-sm text-muted">Nothing yet.</p>
+      ) : (
+        <ol ref={listRef} className="flex flex-col gap-2" aria-label="Timeline, newest first" aria-busy={loading}>
+          {entries.map((e, i) => (
+            // Drawn only near the screen (the browser skips entries far off it but keeps them in the page)
+            <li
+              key={`${e.at}-${i}`}
+              data-index={i}
+              tabIndex={-1}
+              className="[content-visibility:auto] [contain-intrinsic-size:auto_96px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              <TimelineItem entry={e} />
+            </li>
+          ))}
+        </ol>
+      )}
+      {(failed || offlineTap) && (
+        <p role="alert" className="text-sm text-bad">
+          {offlineTap || isNetwork(earlier.error)
+            ? "You're offline or the server can't be reached. Connect and tap Show earlier entries again."
+            : "Couldn't load earlier entries. Tap Show earlier entries to try again."}
+        </p>
+      )}
+      {more && (
+        // aria-busy, not disabled: a disabled button would drop the keyboard focus while it loads
+        <Button variant="secondary" aria-busy={loading} onClick={showEarlier}>
+          {loading ? 'Loading earlier entries…' : 'Show earlier entries'}
+        </Button>
+      )}
+    </section>
   )
 }
 

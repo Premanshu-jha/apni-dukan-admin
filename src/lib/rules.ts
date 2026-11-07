@@ -139,3 +139,17 @@ export function optional(text: string): string | undefined {
   const t = clean(text)
   return t ? t : undefined
 }
+
+/** The shortest name, owner or phone search the backend takes (ShopAdminService.requireSearchable). */
+export const SEARCH_MIN = 3
+
+/**
+ * What the search box may send: the text trimmed, or "" (no search) while it is 1 or 2 letters that aren't a shop
+ * number ("7" and "#42" are, at any length). The backend refuses those with 400 VALIDATION_FAILED {q}: they would
+ * match most shops. Lengths count characters as the backend does (code points), so "डा" is 2.
+ */
+export function searchable(text: string): { q: string; tooShort: boolean } {
+  const t = text.trim()
+  const tooShort = t.length > 0 && [...t].length < SEARCH_MIN && !/^#?\d+$/.test(t)
+  return { q: tooShort ? '' : t, tooShort }
+}

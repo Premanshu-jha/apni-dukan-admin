@@ -13,6 +13,8 @@ import type {
   TeamMember,
   TestModeState,
   TimelineEntry,
+  TimelineNext,
+  TimelinePage,
 } from './types'
 import type { Decision } from '../lib/rules'
 
@@ -54,6 +56,13 @@ export const adminApi = {
     return api<AdminShop[]>('GET', `${A}/shops?${params}`, { signal })
   },
   shop: (id: string) => api<ShopDetail>('GET', `${A}/shops/${encodeURIComponent(id)}`),
+  /** The timeline entries after `after` (the shop page's `timelineNext`, or a page's `next`), exactly as received. */
+  timeline: (id: string, after: TimelineNext, signal?: AbortSignal) =>
+    api<TimelinePage>(
+      'GET',
+      `${A}/shops/${encodeURIComponent(id)}/timeline?${new URLSearchParams({ afterAt: after.afterAt, afterSeq: String(after.afterSeq) })}`,
+      { signal },
+    ),
   decide: (id: string, decision: Decision, body: DecisionIn) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
   addNote: (id: string, note: string) =>
@@ -82,6 +91,9 @@ export const keys = {
   shops: ['admin', 'shops'] as const,
   shopList: (type: ShopType, group: ShopGroup, q: string) => ['admin', 'shops', type, group, q.trim()] as const,
   shop: (id: string) => ['admin', 'shop', id] as const,
+  /** Outside ['admin', 'shop', id]: refreshing the shop page doesn't ask the earlier entries again. */
+  timeline: (id: string, start: TimelineNext | null) =>
+    ['admin', 'timeline', id, start?.afterAt ?? null, start?.afterSeq ?? null] as const,
   team: ['admin', 'team'] as const,
   testMode: ['admin', 'test-mode'] as const,
 }
@@ -118,6 +130,25 @@ export function useShopList(type: ShopType, group: ShopGroup, q: string) {
 /** A shop's page. Its photo links last a few minutes, so it is re-read every 4 minutes while open. */
 export function useShopDetail(id: string) {
   return useQuery({ queryKey: keys.shop(id), queryFn: () => adminApi.shop(id), refetchInterval: 4 * 60_000 })
+}
+
+/**
+ * A shop's earlier timeline entries, 50 a page, after the shop page's first 50 (`start` = its `timelineNext`). Asked
+ * only once "Show earlier entries" is tapped (`enabled`). Keyed by `start`: when new entries push the first 50 down
+ * (a note, a decision), the shop page's `timelineNext` changes and the earlier entries start again from there, so
+ * nothing is missing between the two or shown twice. Old entries don't change, so loaded pages are never asked again
+ * (no refetch on focus); the memory grows only with the admin's taps.
+ */
+export function useEarlierTimeline(id: string, start: TimelineNext | null, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: keys.timeline(id, start),
+    initialPageParam: start,
+    queryFn: ({ pageParam, signal }) => adminApi.timeline(id, pageParam!, signal),
+    getNextPageParam: (last: TimelinePage) => last.next ?? undefined,
+    enabled: enabled && start !== null,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  })
 }
 
 export function useTeam() {

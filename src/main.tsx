@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import { keys, whenRoleMayHaveChanged } from './api/admin'
 import { refreshSession, whenSessionEnds } from './api/client'
-import { ApiError } from './api/errors'
+import { ApiError, retryDelay } from './api/errors'
 import { App } from './app/App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { forgetThisPerson } from './features/auth/signOut'
@@ -29,6 +29,8 @@ const queryClient: QueryClient = new QueryClient({
     queries: {
       // Retry network blips, never answers the backend meant (a 4xx is final).
       retry: (count, error) => count < 2 && (!(error instanceof ApiError) || error.status === 0 || error.status >= 500),
+      // Waits as long as the backend's Retry-After asks (SERVICE_BUSY), else 1 s, 2 s
+      retryDelay,
       refetchOnWindowFocus: true,
       // Try even when the phone says it is offline: a failed try shows "you're offline" instead of waiting silently.
       networkMode: 'always',
