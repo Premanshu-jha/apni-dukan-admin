@@ -41,7 +41,7 @@ export function PhoneStep() {
 
   return (
     <Page>
-      <Brand subtitle="For the Apni Dukan team. Sign in with your mobile number." />
+      <Brand subtitle="For the Clozest team. Sign in with your mobile number." />
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
         <Field
           id="phone"
@@ -62,7 +62,7 @@ export function PhoneStep() {
       </form>
       <p className="mt-2 text-center text-sm text-muted">
         Lost your phone number?{' '}
-        <Link to="/signin/recover" className="text-brand underline">
+        <Link to="/signin/recover" className="text-link underline">
           Recover with your email
         </Link>
       </p>

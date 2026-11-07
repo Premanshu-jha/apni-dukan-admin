@@ -460,7 +460,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
       )}
       {entry.note && (
         <div className="rounded-xl border border-dashed border-brand/50 bg-brand/5 px-3 py-2">
-          <p className="mb-1 text-xs font-semibold text-brand">Only admins see this</p>
+          <p className="mb-1 text-xs font-semibold text-link">Only admins see this</p>
           <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{entry.note}</p>
         </div>
       )}

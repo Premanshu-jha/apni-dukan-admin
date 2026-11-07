@@ -32,10 +32,10 @@ export function NotTeam({ onRecheck }: { onRecheck?: () => void }) {
     <Page>
       <Brand />
       <div className="flex flex-col gap-3 text-center">
-        <h1 className="text-xl font-semibold">This is for the Apni Dukan team</h1>
+        <h1 className="text-xl font-semibold">This is for the Clozest team</h1>
         <p className="text-muted">
           {phone ? <>You're signed in as +91 {formatPhone(phone)}, which isn't on the team. </> : null}
-          Shop owners use the partner app, customers the Apni Dukan app. If you should be on the team, ask the super
+          Shop owners use the partner app, customers the Clozest app. If you should be on the team, ask the super
           admin to add your number.
         </p>
       </div>

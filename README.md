@@ -1,6 +1,6 @@
-# Apni Dukan Admin
+# Clozest Admin
 
-The website the Apni Dukan team uses: the field team visits new and edited shops and approves them, sends them back
+The website the Clozest team uses: the field team visits new and edited shops and approves them, sends them back
 or suspends them; support looks up a customer's strikes; the super admin manages the team and the OTP test mode. It
 is phone-first (the field team uses it on the street), dark only, and talks only to
 [apni-dukan-backend](https://github.com/Premanshu-jha/apni-dukan-backend) (the admin API from the backend PR "Admin
@@ -10,7 +10,7 @@ roles, OTP test mode, field-visit pages").
 | --- | --- | --- |
 | Admin (`adminRole: ADMIN`) | The super admin adds their number in Team | Shops (dashboard, lists, shop pages and decisions), Support, More |
 | Super admin (`SUPER_ADMIN`) | Set on the backend | Everything an admin sees, plus Team and Test mode |
-| Anyone else (`NONE`) | Signs in like everywhere else | "This is for the Apni Dukan team" and Sign out, nothing more |
+| Anyone else (`NONE`) | Signs in like everywhere else | "This is for the Clozest team" and Sign out, nothing more |
 
 Shop owners use the partner app; customers use the customer app.
 
@@ -90,7 +90,7 @@ reviews walk the list against the code.
 ```mermaid
 flowchart TD
   A["Signed in"] --> B{"adminRole in the sign-in"}
-  B -- "NONE" --> N["This is for the Apni Dukan team (Check again, Sign out)"]
+  B -- "NONE" --> N["This is for the Clozest team (Check again, Sign out)"]
   B -- "ADMIN or SUPER_ADMIN" --> C{"Email and name done?"}
   C -- "no" --> W["Email step, name step"]
   C -- "yes" --> D{"GET /admin/me"}
@@ -138,7 +138,7 @@ docs/         scenarios.md
 
 ### Who is let in
 
-The sign-in token's `user.adminRole` decides first: `NONE` sees "This is for the Apni Dukan team" on every address
+The sign-in token's `user.adminRole` decides first: `NONE` sees "This is for the Clozest team" on every address
 and the app never calls `/admin` for them (nor runs the email and name steps). For admins, `AdminGate` loads
 `GET /admin/me` and gives it to every screen; its role wins over the saved sign-in (it is the backend's current
 one). Any admin call refused with 403 or 404 re-reads `/admin/me`, so someone taken off the team, or a super admin
@@ -220,7 +220,7 @@ with the `Caddyfile` (the build at `/app/dist`, as on Railway) and checks every 
 
 ### Installing and offline
 
-`public/manifest.webmanifest` ("Apni Dukan Admin", short "AD Admin") lists the SVG icon and PNGs (192, 512,
+`public/manifest.webmanifest` ("Clozest Admin", short "Clozest Team") lists the SVG icon and PNGs (192, 512,
 maskable 512) plus `apple-touch-icon.png` for iPhone, all made from `public/icon.svg` by `npm run icons` (sharp);
 commit the PNGs after changing the SVG. `public/sw.js` only keeps a small offline page (`offline.html`, its CSS and
 the icon): opening the app without a connection shows "You're offline" with "Try again". Nothing else is cached (the
@@ -312,7 +312,7 @@ First version, against the admin API contract (merge the backend PR "Admin roles
 pages" first):
 
 - Sign-in, recovery, email and name steps and the session, copied from the partner app (own storage keys `ada.*`).
-  Only `adminRole` ADMIN or SUPER_ADMIN gets in; anyone else sees "This is for the Apni Dukan team" and Sign out.
+  Only `adminRole` ADMIN or SUPER_ADMIN gets in; anyone else sees "This is for the Clozest team" and Sign out.
 - A red banner on every screen while OTP test mode is on ("OTP test mode is on until 6:30 PM").
 - Dashboard with Kirana / Salon tabs and six counts; shop lists with search and loading, empty, error and offline
   states.

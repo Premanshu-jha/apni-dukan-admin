@@ -1,6 +1,6 @@
 import type { AdminRole, User } from '../api/types'
 
-/** Only people on the Apni Dukan team get past the sign-in. */
+/** Only people on the Clozest team get past the sign-in. */
 export function isTeam(role: AdminRole | null | undefined): boolean {
   return role === 'ADMIN' || role === 'SUPER_ADMIN'
 }

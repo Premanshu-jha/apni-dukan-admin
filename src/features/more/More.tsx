@@ -24,7 +24,7 @@ export function More() {
       >
         Sign out
       </Button>
-      <p className="text-center text-xs text-muted">Apni Dukan Admin 0.1.0</p>
+      <p className="text-center text-xs text-muted">Clozest Admin 0.1.0</p>
     </Page>
   )
 }
