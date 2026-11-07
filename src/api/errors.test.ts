@@ -7,6 +7,10 @@ describe('error explanations', () => {
   it('uses the agreed words for every admin refusal in the contract', () => {
     expect(explain(err(409, 'SHOP_CHANGED'))).toBe('This shop changed since you opened it (the owner or another admin). Reload and check again.')
     expect(explain(err(409, 'REAL_ACCOUNT'))).toBe('That number already has a real account (a customer or a shop). Use a number nobody has signed in with.')
+    expect(explain(err(403, 'OWN_SHOP'))).toMatch(/^You work in this shop .* Ask another admin\.$/)
+    expect(wrongStatusText(new ApiError(409, { code: 'WRONG_STATUS', details: { status: 'CLOSED' } }))).toBe(
+      'Someone else decided meanwhile: it is now Closed by the owner.',
+    )
     expect(explain(err(409, 'TEST_PHONE'))).toBe("This is a test number, or an account made in test mode, so it can't be an admin.")
     for (const code of ['ALREADY_ADMIN', 'TEST_PHONE', 'CANT_REMOVE_SUPER_ADMIN', 'ADMIN_PHONE', 'REAL_ACCOUNT', 'ALREADY_TEST_PHONE', 'CUSTOMER_NOT_FOUND', 'STRIKE_NOT_FOUND', 'INVALID_PHONE', 'SUPER_ADMIN_ONLY']) {
       expect(explain(err(409, code))).toBe(ADMIN_MESSAGES[code])

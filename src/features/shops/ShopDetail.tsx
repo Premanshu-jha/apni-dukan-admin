@@ -6,7 +6,7 @@ import { ADMIN_MESSAGES, explain, isApiError, isNetwork, wrongStatusText } from 
 import type { AdminShop, Change, ShopDetail as Detail, ShopStatus, TimelineEntry, TimelineNext } from '../../api/types'
 import { Photo } from '../../components/Photo'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
-import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, TYPE_LABELS } from '../../lib/labels'
+import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
 import { directionsUrl, distanceLabel, telUrl } from '../../lib/links'
 import { formatPhone } from '../../lib/phone'
 import { DECISION_LABELS, decisionsFor, type Decision } from '../../lib/rules'
@@ -172,7 +172,7 @@ export function ShopDetail() {
       {detail.isError && <Banner tone="warn">Couldn't refresh: {explain(detail.error)}</Banner>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Pill tone={shop.status === 'APPROVED' ? 'good' : shop.status === 'SUSPENDED' ? 'bad' : 'warn'}>{STATUS_LABELS[shop.status]}</Pill>
+        <Pill tone={STATUS_TONES[shop.status] ?? 'warn'}>{STATUS_LABELS[shop.status] ?? shop.status}</Pill>
         {shop.group && <Pill tone="muted">{GROUP_LABELS[shop.group]}</Pill>}
         <Pill tone="muted">{TYPE_LABELS[shop.type]}</Pill>
       </div>
@@ -455,7 +455,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
       )}
       {entry.reason && (
         <p>
-          <span className="text-muted">Owner was told: </span>"{entry.reason}"
+          <span className="text-muted">{entry.event === 'CLOSED' ? "Owner's reason: " : 'Owner was told: '}</span>"{entry.reason}"
         </p>
       )}
       {entry.note && (

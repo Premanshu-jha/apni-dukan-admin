@@ -1,20 +1,26 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { caddyHeaders, securityHeaders } from './security-headers.ts'
 
-/**
- * The Content-Security-Policy in index.html is for the built site (and the end-to-end tests, which run the build).
- * The dev server needs inline scripts for hot reload, so it serves the page without it.
- */
-function noCspInDev(): Plugin {
+/** Writes the security headers into the build, for the Caddyfile (how Railway serves the site). */
+function securityHeadersFile(headers: Record<string, string>): Plugin {
   return {
-    name: 'no-csp-in-dev',
-    apply: 'serve',
-    transformIndexHtml: (html) => html.replace(/<meta\s+http-equiv="Content-Security-Policy"[^>]*\/>/, ''),
+    name: 'security-headers-file',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'security-headers.caddy', source: caddyHeaders(headers) })
+    },
   }
 }
 
-export default defineConfig({
-  plugins: [react(), tailwindcss(), noCspInDev()],
-  server: { port: 5175 },
+export default defineConfig(({ mode }) => {
+  // The build's settings (.env files and the host's variables), the same ones the app is built with
+  const headers = securityHeaders(loadEnv(mode, process.cwd(), ''))
+  return {
+    plugins: [react(), tailwindcss(), securityHeadersFile(headers)],
+    server: { port: 5175 },
+    // The built site as Railway serves it (the dev server leaves them out: hot reload needs inline scripts)
+    preview: { headers },
+  }
 })
