@@ -7,12 +7,12 @@ import type { BrowserContext, Route } from '@playwright/test'
  * per test. Where the contract leaves something open, the choice is written next to it and listed in the README.
  */
 export const API = 'http://api.test'
-/** Photo links are https, like the real signed links (the site's CSP allows images from https only). */
+/** Photo links point at their own server, like the real signed links (the CSP allows images from PHOTO_ORIGIN only). */
 export const PHOTOS = 'https://photos.test'
 const P = '/api/v1'
 
 export type AdminRole = 'NONE' | 'ADMIN' | 'SUPER_ADMIN'
-export type Status = 'DRAFT' | 'PENDING_VISIT' | 'APPROVED' | 'SUSPENDED'
+export type Status = 'DRAFT' | 'PENDING_VISIT' | 'APPROVED' | 'SUSPENDED' | 'CLOSED'
 type Json = Record<string, unknown>
 
 export interface MockUser {
@@ -109,6 +109,8 @@ export class MockApi {
   calls: Call[] = []
   shops: Json[] = []
   extra = new Map<string, ShopExtra>()
+  /** Shops (ids) the signed-in admin works in (owner, helper or barber): decisions and notes answer 403 OWN_SHOP. */
+  memberOf = new Set<string>()
   team: Json[] = [
     { userId: 'u0', name: 'Meera Super', phone: '9000000001', adminRole: 'SUPER_ADMIN', since: '2026-10-01T05:00:00Z' },
   ]
@@ -234,6 +236,8 @@ export class MockApi {
         return 'LIVE'
       case 'SUSPENDED':
         return 'SUSPENDED'
+      case 'CLOSED':
+        return 'CLOSED'
       default:
         return null
     }
@@ -254,6 +258,18 @@ export class MockApi {
   }
 
   /** A status change made elsewhere (another admin): the version moves on with it, as on the backend. */
+  /**
+   * The owner closes the shop (ShopOwnershipService.close, Shop.close): CLOSED with statusReason = their reason
+   * (or null), and a timeline entry CLOSED by the owner with the same reason.
+   */
+  closeShop(id: string, reason: string | null) {
+    const shop = this.shops.find((s) => s.id === id)!
+    Object.assign(shop, { status: 'CLOSED', statusReason: reason, version: (shop.version as number) + 1 })
+    const x = this.extra.get(id)!
+    x.statusSince = new Date().toISOString()
+    x.timeline.unshift({ at: x.statusSince, event: 'CLOSED', byName: shop.ownerName, byAdmin: false, reason, note: null, checklist: [] })
+  }
+
   setStatus(id: string, status: Status, reason: string | null = null) {
     const shop = this.shops.find((s) => s.id === id)!
     Object.assign(shop, { status, statusReason: reason, version: (shop.version as number) + 1 })
@@ -426,7 +442,7 @@ export class MockApi {
 
     if (p === '/admin/dashboard') {
       const counts = (type: string) => {
-        const c: Json = { FIRST_VISIT: 0, RECHECK: 0, SENT_BACK: 0, LIVE: 0, SUSPENDED: 0 }
+        const c: Json = { FIRST_VISIT: 0, RECHECK: 0, SENT_BACK: 0, LIVE: 0, SUSPENDED: 0, CLOSED: 0 }
         for (const s of this.shops) {
           const g = this.groupOf(s)
           if (s.type === type && g) c[g] = (c[g] as number) + 1
@@ -442,7 +458,7 @@ export class MockApi {
       const type = url.searchParams.get('type') || null
       const group = url.searchParams.get('group') || null
       const TYPES = ['KIRANA', 'SALON']
-      const GROUPS = ['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED']
+      const GROUPS = ['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED', 'CLOSED']
       if (type !== null && !TYPES.includes(type)) return fail(400, 'BAD_REQUEST', `'${type}' is not a valid value for 'type'`, { allowed: TYPES })
       if (group !== null && !GROUPS.includes(group)) return fail(400, 'BAD_REQUEST', `'${group}' is not a valid value for 'group'`, { allowed: GROUPS })
       // The next page: after the last shop's statusSince and id (ShopAdminController). Spring reads the values first:
@@ -527,6 +543,10 @@ export class MockApi {
           timeline: first.items,
           timelineNext: first.next,
         })
+      }
+      // ShopAdminService.requireNotOwnShop: an admin who works in the shop, before anything else
+      if (action && method === 'POST' && this.memberOf.has(shop.id as string)) {
+        return fail(403, 'OWN_SHOP', "You can't decide on a shop you belong to. Ask another admin.")
       }
       const note = typeof body?.note === 'string' ? cleanText(body.note) : ''
       if (action === 'notes' && method === 'POST') {

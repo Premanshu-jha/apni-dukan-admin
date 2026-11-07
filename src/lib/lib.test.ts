@@ -24,14 +24,16 @@ import { dateTimeIst, howLong, testModeActive, testModeText, timeIst, untilLabel
 const NOW = Date.parse('2026-11-05T08:00:00Z') // 1:30 PM in India
 
 describe('groups and labels', () => {
-  it('has the five dashboard groups in order with their words', () => {
+  it('has the six dashboard groups in order with their words', () => {
     expect(GROUPS.map((g) => GROUP_LABELS[g])).toEqual([
       'Waiting for first visit',
       'Re-check after edit',
       'Sent back',
       'Live',
       'Suspended',
+      'Closed by the owner',
     ])
+    expect(isGroup('CLOSED')).toBe(true)
     expect(isGroup('RECHECK')).toBe(true)
     expect(isGroup('DRAFT')).toBe(false)
     expect(isShopType('SALON')).toBe(true)
@@ -58,6 +60,9 @@ describe('groups and labels', () => {
     expect(eventLabel({ event: 'SUBMITTED', byName: 'Ravi', byAdmin: false })).toBe('Submitted by Ravi')
     expect(eventLabel({ event: 'NOTE', byName: 'Asha', byAdmin: true })).toBe('Note by Asha')
     expect(eventLabel({ event: 'REINSTATED', byName: 'Meera', byAdmin: true })).toBe('Reinstated by Meera')
+    expect(eventLabel({ event: 'CLOSED', byName: 'Ravi', byAdmin: false })).toBe('Closed by Ravi (the owner)')
+    expect(eventLabel({ event: 'CLOSED', byName: null, byAdmin: false })).toBe('Closed by the owner')
+    expect(eventLabel({ event: 'HANDED_OVER', byName: 'Kavita', byAdmin: false })).toBe('Handed over to Kavita')
   })
 
   it('says how long a shop has been in its group', () => {
@@ -67,6 +72,7 @@ describe('groups and labels', () => {
     expect(sinceText('SENT_BACK', new Date(NOW - 20 * 60_000).toISOString(), NOW)).toBe('Sent back 20 min ago')
     expect(sinceText('LIVE', new Date(NOW - 86400_000).toISOString(), NOW)).toBe('Live for 1 day')
     expect(sinceText('SUSPENDED', new Date(NOW).toISOString(), NOW)).toBe('Suspended just now')
+    expect(sinceText('CLOSED', threeDays, NOW)).toBe('Closed 3 days ago')
     expect(sinceText(null, threeDays, NOW)).toBe('For 3 days')
   })
 })
