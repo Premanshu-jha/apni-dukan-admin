@@ -56,20 +56,20 @@ export function fieldError(e: unknown, field: string): string | undefined {
  * says exactly what to do next rather than the backend's general message.
  */
 export const ADMIN_MESSAGES: Record<string, string> = {
-  SHOP_CHANGED: 'This shop changed since you opened it (the owner or another admin). Reload and check again.',
+  SHOP_CHANGED: 'This business changed since you opened it (the owner or another admin). Reload and check again.',
   WRONG_STATUS: 'Someone else decided meanwhile.',
   ALREADY_ADMIN: 'This number is already on the team.',
   TEST_PHONE: 'This is a test number, or an account made in test mode, so it can\'t be an admin.',
   CANT_REMOVE_SUPER_ADMIN: "The super admin can't be removed from the team.",
   ADMIN_PHONE: "This number belongs to someone on the team, and an admin's number can't be a test number.",
-  REAL_ACCOUNT: 'That number already has a real account (a customer or a shop). Use a number nobody has signed in with.',
+  REAL_ACCOUNT: 'That number already has a real account (a customer or a business). Use a number nobody has signed in with.',
   ALREADY_TEST_PHONE: 'This number is already a test number.',
   CUSTOMER_NOT_FOUND: 'No customer has an account with this number.',
   STRIKE_NOT_FOUND: 'This strike was already removed, maybe by someone else. The list now shows what is left.',
   INVALID_PHONE: "That isn't a valid mobile number. Check the 10 digits.",
   SUPER_ADMIN_ONLY: 'Only the super admin can do this.',
   OWN_SHOP:
-    "You work in this shop (as its owner, a helper or a barber), so you can't decide on it or write notes about it. Ask another admin.",
+    "You work in this business (as its owner, a helper or a barber), so you can't decide on it or write notes about it. Ask another admin.",
 }
 
 /** 409 WRONG_STATUS: "Someone else decided meanwhile: it is now Live." (details.status = the status now). */

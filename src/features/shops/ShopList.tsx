@@ -78,7 +78,7 @@ export function ShopList() {
           inputMode="search"
           autoComplete="off"
           placeholder="#1042, name, owner or phone"
-          hint={typed.tooShort ? 'Type at least 3 letters (or a shop number like #42).' : undefined}
+          hint={typed.tooShort ? 'Type at least 3 letters (or a business number like #42).' : undefined}
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -92,7 +92,7 @@ export function ShopList() {
         <Loading />
       ) : list.isError && !list.data && fieldError(list.error, 'q') ? (
         // The backend still refused the search (its count of letters differs): say what to do, not "try again"
-        <EmptyState title="Type at least 3 letters" body="Or search a shop number like #42, or 3 digits of the owner's phone." />
+        <EmptyState title="Type at least 3 letters" body="Or search a business number like #42, or 3 digits of the owner's phone." />
       ) : list.isError && !list.data ? (
         <ErrorState message={explain(list.error)} onRetry={() => void list.refetch()} />
       ) : (
@@ -100,20 +100,20 @@ export function ShopList() {
           {refreshFailed && <Banner tone="warn">Couldn't refresh: {explain(list.error)}</Banner>}
           {shops.length === 0 ? (
             q ? (
-              <EmptyState title="No shop matches" body={`Nothing in this list matches "${q}".`} />
+              <EmptyState title="No business matches" body={`Nothing in this list matches "${q}".`} />
             ) : (
-              <EmptyState title="Nothing here" body={`No ${TYPE_LABELS[type].toLowerCase()} shop is in "${GROUP_LABELS[group]}" right now.`} />
+              <EmptyState title="Nothing here" body={`No ${TYPE_LABELS[type].toLowerCase()} business is in "${GROUP_LABELS[group]}" right now.`} />
             )
           ) : (
             <>
               <p ref={countRef} tabIndex={-1} className="text-sm text-muted focus:outline-none">
-                {more ? `First ${shops.length} shops` : `${shops.length} ${shops.length === 1 ? 'shop' : 'shops'}`}, longest
+                {more ? `First ${shops.length} businesses` : `${shops.length} ${shops.length === 1 ? 'business' : 'businesses'}`}, longest
                 waiting first
               </p>
               <p aria-live="polite" className="sr-only">
                 {shops.length} shops shown
               </p>
-              <ul ref={listRef} className="flex flex-col gap-2" aria-label="Shops">
+              <ul ref={listRef} className="flex flex-col gap-2" aria-label="Businesses">
                 {shops.map((s, i) => (
                   <li key={s.id}>
                     <ShopCard shop={s} now={now} index={i} />
@@ -125,8 +125,8 @@ export function ShopList() {
           {(moreFailed || offlineTap) && (
             <p role="alert" className="text-sm text-bad">
               {offlineTap || isNetwork(list.error)
-                ? "You're offline or the server can't be reached. Connect and tap Show more shops again."
-                : "Couldn't load more shops. Tap Show more shops to try again."}
+                ? "You're offline or the server can't be reached. Connect and tap Show more businesses again."
+                : "Couldn't load more businesses. Tap Show more businesses to try again."}
             </p>
           )}
           {more && (
@@ -145,7 +145,7 @@ export function ShopList() {
                 void list.fetchNextPage()
               }}
             >
-              {list.isFetchingNextPage ? 'Loading more shops…' : 'Show more shops'}
+              {list.isFetchingNextPage ? 'Loading more businesses…' : 'Show more businesses'}
             </Button>
           )}
         </>

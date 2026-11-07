@@ -240,6 +240,13 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.4.1 — 2026-11-07
+
+- Wording: the field-team app says "business" instead of "shop" on every screen (bottom bar "Businesses", page
+  titles, search hint, empty states, "Show more businesses", decision texts, the "Business was shut" checklist item,
+  error messages, the offline page), and "Front photo" for the shop photo. No behaviour change: routes (`/shops…`),
+  API paths, fields and error codes stay as they are. Messages the backend writes itself are unchanged here.
+
 ### 0.4.0 — 2026-11-07
 
 - Security headers as real response headers on Railway: a `Caddyfile` (Railpack serves the build with Caddy) with

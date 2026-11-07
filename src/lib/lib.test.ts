@@ -47,7 +47,7 @@ describe('groups and labels', () => {
       'Pin is in the wrong place',
       "Address doesn't match",
       "GSTIN / Udyam doesn't match",
-      'Shop was shut',
+      'Business was shut',
       'Other',
     ])
   })
@@ -119,7 +119,7 @@ describe('decisions and form checks', () => {
   })
 
   it('starts a reason from the ticked items in checklist order, leaving out Other', () => {
-    expect(reasonFromChecklist(['SHOP_SHUT', 'NAME_BOARD_NOT_VISIBLE', 'OTHER'])).toBe("Photo doesn't show the name board. Shop was shut.")
+    expect(reasonFromChecklist(['SHOP_SHUT', 'NAME_BOARD_NOT_VISIBLE', 'OTHER'])).toBe("Photo doesn't show the name board. Business was shut.")
     expect(reasonFromChecklist(['OTHER'])).toBe('')
     expect(reasonFromChecklist([])).toBe('')
   })
@@ -216,8 +216,8 @@ describe('links, phones and roles', () => {
     expect(isSuperAdmin('ADMIN')).toBe(false)
     expect(roleOf(null)).toBe('NONE')
     expect(roleOf({ id: 'u', phone: null, name: null, email: null, emailVerified: false, admin: true })).toBe('NONE')
-    expect(tabsFor('ADMIN').map((t) => t.label)).toEqual(['Shops', 'Support', 'More'])
-    expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Shops', 'Support', 'Team', 'Test mode', 'More'])
+    expect(tabsFor('ADMIN').map((t) => t.label)).toEqual(['Businesses', 'Support', 'More'])
+    expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Businesses', 'Support', 'Team', 'Test mode', 'More'])
   })
 })
 
