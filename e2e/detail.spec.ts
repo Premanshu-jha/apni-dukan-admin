@@ -408,3 +408,34 @@ test.describe('on a phone set to New York time', () => {
     await expect(page.getByText('2 Nov 2026')).toBeVisible()
   })
 })
+
+test('403 OWN_SHOP: an admin who works in the shop is told plainly on the decision and the note, and stays signed in', async ({ page, context, api }) => {
+  const shop = api.addShop()
+  api.memberOf.add(shop.id as string)
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  const meReads = api.calledTimes('GET', '/api/v1/admin/me')
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
+  const told = /You work in this shop \(as its owner, a helper or a barber\), so you can't decide on it or write notes about it\. Ask another admin\./
+  await expect(page.getByRole('dialog').getByText(told)).toBeVisible()
+  // Not a doubt about this person's role: /admin/me isn't read again for it
+  expect(api.calledTimes('GET', '/api/v1/admin/me')).toBe(meReads)
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await page.getByRole('button', { name: 'Add note' }).click()
+  await page.getByRole('dialog').getByLabel('Note', { exact: true }).fill('Owner is my cousin')
+  await page.getByRole('dialog').getByRole('button', { name: 'Add note' }).click()
+  await expect(page.getByRole('dialog').getByText(told)).toBeVisible()
+  expect(shop.status).toBe('PENDING_VISIT')
+})
+
+test('a hand-over in the timeline names the new owner', async ({ page, context, api }) => {
+  const shop = api.addShop({ status: 'APPROVED' })
+  api.extra.get(shop.id as string)!.timeline.unshift({
+    at: new Date().toISOString(), event: 'HANDED_OVER', byName: 'Kavita Rao', byAdmin: false, reason: null, note: null, checklist: [],
+  })
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await expect(page.getByText('Handed over to Kavita Rao')).toBeVisible()
+})

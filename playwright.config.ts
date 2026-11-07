@@ -17,7 +17,7 @@ export default defineConfig({
     timezoneId: 'Asia/Kolkata',
   },
   webServer: {
-    command: 'npx vite build --mode e2e && npx vite preview --port 4174 --strictPort',
+    command: 'npx vite build --mode e2e && npx vite preview --mode e2e --port 4174 --strictPort',
     url: 'http://localhost:4174',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -1,7 +1,7 @@
 import { atDashboard, expect, signedIn, test } from './helpers'
 import type { MockApi } from './mockApi'
 
-test('the dashboard shows the five counts for kirana and salon, each opening its list', async ({ page, context, api }) => {
+test('the dashboard shows the six counts for kirana and salon, each opening its list', async ({ page, context, api }) => {
   api.addShop({ name: 'Gupta General Store' })
   api.addShop({ name: 'Sharma Kirana' }, { approvedBefore: true })
   api.addShop({ status: 'APPROVED' })
@@ -17,6 +17,7 @@ test('the dashboard shows the five counts for kirana and salon, each opening its
   await expect(counts.getByRole('link', { name: 'Sent back: 1' })).toBeVisible()
   await expect(counts.getByRole('link', { name: 'Live: 2' })).toBeVisible()
   await expect(counts.getByRole('link', { name: 'Suspended: 0' })).toBeVisible()
+  await expect(counts.getByRole('link', { name: 'Closed by the owner: 0' })).toBeVisible()
 
   await page.getByRole('tab', { name: 'Salon' }).click()
   await expect(page).toHaveURL(/type=SALON/)
@@ -297,4 +298,27 @@ test('a refresh answered 304 (nothing changed) keeps the shop on screen', async 
   api.ownerEdits(shop.id as string, { name: 'Gupta Store' })
   await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')))
   await expect(page.getByRole('heading', { name: 'Gupta Store' })).toBeVisible()
+})
+
+test('closed shops: their own group on the dashboard and list, "Closed by the owner" everywhere, no decisions', async ({ page, context, api }) => {
+  const shop = api.addShop({ type: 'SALON', name: 'Old Cuts', status: 'APPROVED' })
+  api.closeShop(shop.id as string, 'Moving to another city')
+  api.addShop({ type: 'SALON', status: 'APPROVED' })
+  await atDashboard(page, context, api)
+  await page.getByRole('tab', { name: 'Salon' }).click()
+  const salon = page.getByRole('list', { name: 'Salon shops by group' })
+  await expect(salon.getByRole('link', { name: 'Live: 1' })).toBeVisible()
+  await salon.getByRole('link', { name: 'Closed by the owner: 1' }).click()
+  await expect(page.getByRole('heading', { name: 'Salon: Closed by the owner' })).toBeVisible()
+  await expect.poll(() => api.calls.some((c) => c.path === '/api/v1/admin/shops?type=SALON&group=CLOSED')).toBe(true)
+  await expect(page.getByText('Closed just now')).toBeVisible()
+  await page.getByText('Old Cuts').click()
+  await expect(page.getByText('Closed by the owner').first()).toBeVisible()
+  // The owner's own reason, not something the owner was told
+  await expect(page.getByText("Owner's reason:")).toBeVisible()
+  await expect(page.getByText('"Moving to another city"').first()).toBeVisible()
+  for (const d of ['Approve', 'Send back', 'Suspend', 'Reinstate']) {
+    await expect(page.getByRole('button', { name: d, exact: true })).toHaveCount(0)
+  }
+  await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible()
 })
