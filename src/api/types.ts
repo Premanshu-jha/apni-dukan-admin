@@ -50,8 +50,9 @@ export interface AdminMe {
 // ---------- shops ----------
 
 export type ShopType = 'KIRANA' | 'SALON'
-export type ShopStatus = 'DRAFT' | 'PENDING_VISIT' | 'APPROVED' | 'SUSPENDED'
-export type ShopGroup = 'FIRST_VISIT' | 'RECHECK' | 'SENT_BACK' | 'LIVE' | 'SUSPENDED'
+/** CLOSED: its owner closed it for good (no decision applies, 409 WRONG_STATUS). */
+export type ShopStatus = 'DRAFT' | 'PENDING_VISIT' | 'APPROVED' | 'SUSPENDED' | 'CLOSED'
+export type ShopGroup = 'FIRST_VISIT' | 'RECHECK' | 'SENT_BACK' | 'LIVE' | 'SUSPENDED' | 'CLOSED'
 
 /** GET /admin/dashboard */
 export type Dashboard = Record<ShopType, Record<ShopGroup, number>>
@@ -113,7 +114,17 @@ export type ChecklistItem =
   | 'SHOP_SHUT'
   | 'OTHER'
 
-export type TimelineEvent = 'SUBMITTED' | 'EDITED' | 'APPROVED' | 'SENT_BACK' | 'SUSPENDED' | 'REINSTATED' | 'NOTE'
+/** CLOSED: the owner closed it (reason: theirs, for the field team). HANDED_OVER: by = the new owner. */
+export type TimelineEvent =
+  | 'SUBMITTED'
+  | 'EDITED'
+  | 'APPROVED'
+  | 'SENT_BACK'
+  | 'SUSPENDED'
+  | 'REINSTATED'
+  | 'NOTE'
+  | 'CLOSED'
+  | 'HANDED_OVER'
 
 export interface TimelineEntry {
   at: string

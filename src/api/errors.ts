@@ -66,6 +66,8 @@ export const ADMIN_MESSAGES: Record<string, string> = {
   STRIKE_NOT_FOUND: 'This strike was already removed, maybe by someone else. The list now shows what is left.',
   INVALID_PHONE: "That isn't a valid mobile number. Check the 10 digits.",
   SUPER_ADMIN_ONLY: 'Only the super admin can do this.',
+  OWN_SHOP:
+    "You work in this shop (as its owner, a helper or a barber), so you can't decide on it or write notes about it. Ask another admin.",
 }
 
 /** 409 WRONG_STATUS: "Someone else decided meanwhile: it is now Live." (details.status = the status now). */

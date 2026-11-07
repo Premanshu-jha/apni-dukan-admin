@@ -4,8 +4,8 @@ import type { AdminRole, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeK
 export const SHOP_TYPES: ShopType[] = ['KIRANA', 'SALON']
 export const TYPE_LABELS: Record<ShopType, string> = { KIRANA: 'Kirana', SALON: 'Salon' }
 
-/** The dashboard's five counts, in the order the field team works them. */
-export const GROUPS: ShopGroup[] = ['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED']
+/** The dashboard's six counts, in the order the field team works them (closed shops last: nothing to do). */
+export const GROUPS: ShopGroup[] = ['FIRST_VISIT', 'RECHECK', 'SENT_BACK', 'LIVE', 'SUSPENDED', 'CLOSED']
 
 export const GROUP_LABELS: Record<ShopGroup, string> = {
   FIRST_VISIT: 'Waiting for first visit',
@@ -13,6 +13,7 @@ export const GROUP_LABELS: Record<ShopGroup, string> = {
   SENT_BACK: 'Sent back',
   LIVE: 'Live',
   SUSPENDED: 'Suspended',
+  CLOSED: 'Closed by the owner',
 }
 
 /**
@@ -32,6 +33,8 @@ export function sinceText(group: ShopGroup | null, since: string, now: number = 
       return fresh ? 'Live since just now' : `Live for ${d}`
     case 'SUSPENDED':
       return fresh ? 'Suspended just now' : `Suspended for ${d}`
+    case 'CLOSED':
+      return fresh ? 'Closed just now' : `Closed ${d} ago`
     default:
       return fresh ? 'Since just now' : `For ${d}`
   }
@@ -42,6 +45,16 @@ export const STATUS_LABELS: Record<ShopStatus, string> = {
   PENDING_VISIT: 'Waiting for a visit',
   APPROVED: 'Live',
   SUSPENDED: 'Suspended',
+  CLOSED: 'Closed by the owner',
+}
+
+/** The pill colour of each status. */
+export const STATUS_TONES: Record<ShopStatus, 'good' | 'warn' | 'bad' | 'muted'> = {
+  DRAFT: 'warn',
+  PENDING_VISIT: 'warn',
+  APPROVED: 'good',
+  SUSPENDED: 'bad',
+  CLOSED: 'muted',
 }
 
 export function isGroup(v: string | null | undefined): v is ShopGroup {
@@ -90,6 +103,10 @@ export function eventLabel(e: Pick<TimelineEntry, 'event' | 'byName' | 'byAdmin'
       return `Reinstated${by}`
     case 'NOTE':
       return `Note${by}`
+    case 'CLOSED':
+      return e.byName ? `Closed by ${e.byName} (the owner)` : 'Closed by the owner'
+    case 'HANDED_OVER':
+      return e.byName ? `Handed over to ${e.byName}` : 'Handed over to a new owner'
     default:
       return String(e.event)
   }
