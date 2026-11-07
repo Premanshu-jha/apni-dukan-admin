@@ -6,7 +6,7 @@ import { Tabs } from '../../components/Tabs'
 import { Banner, ErrorState, Loading, Page } from '../../components/ui'
 import { GROUP_LABELS, GROUPS, isShopType, SHOP_TYPES, TYPE_LABELS } from '../../lib/labels'
 
-/** The five counts for kirana or salon; each opens its list. The tab is kept in the address (?type=SALON). */
+/** The six counts for kirana or salon; each opens its list. The tab is kept in the address (?type=SALON). */
 export function Dashboard() {
   const [params, setParams] = useSearchParams()
   const raw = params.get('type')
