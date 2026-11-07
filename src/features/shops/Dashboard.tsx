@@ -39,7 +39,7 @@ export function Dashboard() {
                     className="flex min-h-16 items-center justify-between rounded-2xl border border-line bg-surface px-4 hover:bg-raised"
                   >
                     <span className="font-medium">{GROUP_LABELS[g]}</span>
-                    <span className={`text-2xl font-bold ${count > 0 && (g === 'FIRST_VISIT' || g === 'RECHECK') ? 'text-brand' : 'text-ink'}`}>
+                    <span className={`text-2xl font-bold ${count > 0 && (g === 'FIRST_VISIT' || g === 'RECHECK') ? 'text-link' : 'text-ink'}`}>
                       {count}
                     </span>
                   </Link>

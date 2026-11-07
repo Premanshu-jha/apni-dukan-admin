@@ -12,7 +12,7 @@ export function TestModeBanner() {
   const flag = me.data?.testMode
   if (!testModeActive(flag, now)) return null
   return (
-    <div role="alert" className="sticky top-0 z-40 bg-bad px-4 py-2 text-center text-sm font-semibold text-black">
+    <div role="alert" className="sticky top-0 z-40 bg-bad px-4 py-2 text-center text-sm font-semibold text-bg">
       {testModeText(flag!.until, now)}
     </div>
   )

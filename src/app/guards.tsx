@@ -31,7 +31,7 @@ export function FinishingProfile() {
 
 /**
  * Everything else: signed in, on the team (by the sign-in token's adminRole), email and name done. Someone not on
- * the team sees "This is for the Apni Dukan team" on every address, and no admin call is made for them.
+ * the team sees "This is for the Clozest team" on every address, and no admin call is made for them.
  */
 export function SignedIn() {
   const status = useSession((s) => s.status)

@@ -332,7 +332,7 @@ test('an admin taken off the team mid-decision is moved out (old token 401, refr
   await page.getByRole('button', { name: 'Approve', exact: true }).click()
   api.removeFromTeam()
   await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   expect(api.shops[0].status).toBe('PENDING_VISIT')
   await expect(page.getByText(shop.name as string)).toBeHidden()
 })
@@ -346,7 +346,7 @@ test('a write refused with 404 (removed while the revocation list is down) re-re
   api.removeFromTeam({ redisDown: true })
   const meBefore = api.calledTimes('GET', '/api/v1/admin/me')
   await page.getByRole('dialog').getByRole('button', { name: 'Add note' }).click()
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(meBefore)
 })
 

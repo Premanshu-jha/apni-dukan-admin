@@ -22,17 +22,17 @@ test('an admin signs in with phone and code and lands on the dashboard', async (
   expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(0)
 })
 
-test('someone not on the team sees "This is for the Apni Dukan team" and can only sign out; no admin call is made', async ({ page, api }) => {
+test('someone not on the team sees "This is for the Clozest team" and can only sign out; no admin call is made', async ({ page, api }) => {
   // A brand-new account (no email, no name) that isn't an admin: no email or name steps either.
   api.user = { ...MockApi.completeUser('NONE'), name: null, email: null, emailVerified: false }
   await page.goto('/signin')
   await page.getByLabel('Mobile number').fill('9848012345')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByLabel('Code').fill('123456')
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   for (const path of ['/team', '/shops?type=KIRANA&group=LIVE', '/welcome/email', '/more']) {
     await page.goto(path)
-    await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   }
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden()
   expect(api.calls.some((c) => c.path.startsWith('/api/v1/admin'))).toBe(false)
@@ -44,7 +44,7 @@ test('someone not on the team sees "This is for the Apni Dukan team" and can onl
 test('someone added to the team while on the "not for you" screen gets in with Check again', async ({ page, context, api }) => {
   await signedIn(context, api, 'NONE')
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   await page.getByRole('button', { name: 'Check again' }).click()
   await expect(page.getByText('This number is still not on the team.')).toBeVisible()
   api.setRole('ADMIN')
@@ -91,7 +91,7 @@ test('taken off the team: the old token gets 401, the refresh says NONE, /admin/
   await page.getByRole('link', { name: 'Support' }).click()
   await page.getByLabel("Customer's mobile number").fill('9811122233')
   await page.getByRole('button', { name: 'Look up' }).click()
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   const saved = JSON.parse((await page.evaluate(() => localStorage.getItem('ada.session')))!)
   expect(saved.user.adminRole).toBe('NONE')
 })
@@ -102,7 +102,7 @@ test('an open session whose next /admin/me answers 404 (revocation list down) mo
   api.removeFromTeam({ redisDown: true })
   // No reload, no click: /admin/me is re-read every minute
   await page.clock.runFor(61_000)
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   expect(api.calls.filter((c) => c.path === '/api/v1/admin/me').length).toBeGreaterThanOrEqual(2)
 })
 
@@ -112,7 +112,7 @@ test('a test account is signed out when test mode ends (refresh 401 TEST_MODE_OF
   api.testPhones.push({ phone: '9848012345', label: 'Play review', addedAt: '2026-11-01T05:00:00Z', hasAccount: true })
   await signedIn(context, api, 'NONE')
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   api.testMode = { on: false, until: null, turnedOnByName: null }
   await page.getByRole('button', { name: 'Check again' }).click()
   await expect(page).toHaveURL(/\/signin$/)
@@ -207,7 +207,7 @@ test('a test account is signed out when its number is removed while it is signed
   api.testPhones.push({ phone: '9848012345', label: 'Play review', addedAt: '2026-11-01T05:00:00Z', hasAccount: true })
   await signedIn(context, api, 'NONE')
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'This is for the Apni Dukan team' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
   // Test mode stays on; still covered, so a fresh sign-in works
   await page.getByRole('button', { name: 'Check again' }).click()
   await expect(page.getByText('This number is still not on the team.')).toBeVisible()

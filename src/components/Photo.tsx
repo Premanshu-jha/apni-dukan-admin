@@ -58,7 +58,7 @@ export function Photo({ url, label, className = '' }: { url: string | null; labe
         <img src={url} alt={label} onError={() => setBroken(url)} className="aspect-[4/3] w-full bg-raised object-cover" />
       </button>
       {open && (
-        <div role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={() => setOpen(false)}>
+        <div role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-50 flex flex-col bg-scrim/95" onClick={() => setOpen(false)}>
           <div className="flex items-center justify-between p-2">
             <p className="min-w-0 px-2 font-semibold [overflow-wrap:anywhere]">{label}</p>
             <button ref={close} type="button" onClick={() => setOpen(false)} className="min-h-12 rounded-xl px-4 text-ink hover:bg-raised">
