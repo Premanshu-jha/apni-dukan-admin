@@ -253,6 +253,7 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 - A refresh answered 409 `TRY_AGAIN` (another tab or request swapped the same token first) uses the newer token that
   was saved and retries the call once; never a loop.
 - Dependabot (npm and GitHub Actions, weekly) and `npm audit --audit-level=high` in CI.
+- CI: the build job's checkout keeps no token (`persist-credentials: false`), like the other jobs.
 - Closed shops (backend apni-dukan-backend#34): a sixth group `CLOSED`, "Closed by the owner", on the dashboard and as
   a list ("Closed 3 days ago"); the status `CLOSED` with its label and a grey pill wherever a status shows (the shop
   page, "it is now …" after a `WRONG_STATUS`); no decision buttons for it. Timeline entries `CLOSED` ("Closed by Ravi
