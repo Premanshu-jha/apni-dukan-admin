@@ -192,6 +192,8 @@ export function ShopDetail() {
         </div>
       </section>
 
+      {shop.type === 'SALON' && <SalonVideo url={data.videoUrl ?? null} />}
+
       <div className="grid grid-cols-2 gap-2">
         <a
           href={directionsUrl(shop.latitude, shop.longitude)}
@@ -389,7 +391,65 @@ function WhatChanged({ detail }: { detail: Detail }) {
   )
 }
 
+/**
+ * The salon video for the field team (customers never see it): play it before the visit. Its link lasts at least 15
+ * more minutes and the page reads a fresh one every 4 minutes, but the player keeps the address it loaded (changing it
+ * would stop a video being watched): a newer link is taken only before it loaded or after it failed. One that can't
+ * play here (a phone's codec the browser lacks) can still be opened on its own.
+ */
+function SalonVideo({ url }: { url: string | null }) {
+  const [src, setSrc] = useState(url)
+  const [loaded, setLoaded] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!url || url === src) return
+    if (!loaded || failed) {
+      setSrc(url)
+      setLoaded(false)
+      setFailed(false)
+    }
+  }, [url, src, loaded, failed])
+
+  return (
+    <section aria-labelledby="salon-video" className="flex flex-col gap-2">
+      <h2 id="salon-video" className="font-semibold">Salon video</h2>
+      {!src ? (
+        <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-line p-2 text-center text-sm text-muted">
+          No video yet
+        </div>
+      ) : failed ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-line p-3 text-sm">
+          <p>This video can't play here.</p>
+          <a href={src} target="_blank" rel="noopener noreferrer" className="font-semibold text-link underline">
+            Open video
+          </a>
+        </div>
+      ) : (
+        <video
+          src={src}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label="Salon video"
+          className="aspect-video w-full rounded-xl bg-black"
+          onLoadedMetadata={() => setLoaded(true)}
+          onError={() => setFailed(true)}
+        />
+      )}
+    </section>
+  )
+}
+
 function ChangeRow({ change, detail, shop }: { change: Change; detail: Detail; shop: AdminShop }) {
+  if (change.field === 'shopVideo') {
+    return (
+      <div className="text-sm">
+        <p className="font-medium">{change.label}</p>
+        <p>The owner sent a new video. Watch it below.</p>
+      </div>
+    )
+  }
   if (change.field === 'ownerPhoto' || change.field === 'shopPhoto') {
     const owner = change.field === 'ownerPhoto'
     const what = owner ? 'owner photo' : 'front photo'
