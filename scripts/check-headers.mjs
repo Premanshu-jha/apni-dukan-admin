@@ -24,6 +24,8 @@ async function headersOf(path) {
   check(directive('frame-ancestors') === "frame-ancestors 'none'", `${path}: frame-ancestors is "${directive('frame-ancestors')}"`)
   check(directive('script-src') === `script-src 'self' ${TURNSTILE}`, `${path}: script-src is "${directive('script-src')}"`)
   check(directive('connect-src') === `connect-src 'self' ${API}`, `${path}: connect-src is "${directive('connect-src')}"`)
+  // The salon video plays from its signed R2 link (the build sets no PHOTO_ORIGIN: any R2 address)
+  check(directive('media-src') === "media-src 'self' https://*.r2.cloudflarestorage.com", `${path}: media-src is "${directive('media-src')}"`)
   check(directive('object-src') === "object-src 'none'", `${path}: object-src is "${directive('object-src')}"`)
   check(directive('worker-src') === "worker-src 'self'", `${path}: worker-src is "${directive('worker-src')}"`)
   check(!csp.includes('unsafe-eval'), `${path}: CSP allows eval`)
