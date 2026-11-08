@@ -96,7 +96,8 @@ test('test mode: switch on for 1–8 hours, the red banner appears everywhere, t
   for (const line of [
     'Only numbers nobody has signed in with can be added as test numbers.',
     /While test mode is on, a test number signs in with any 6-digit code \(no SMS is sent\)/,
-    'Email codes are always real, for test numbers too.',
+    /Then, for an email like name@example\.com, any 6-digit email code works too \(no email is\s+sent\)\. A real email address always needs the real email code\./,
+    /This only works for accounts made in test mode\. Account recovery and deleting an account always need the\s+real codes\./,
     'Test accounts are signed out when test mode ends or is switched off, or when their number is removed.',
   ]) {
     await expect(page.getByText(line)).toBeVisible()
