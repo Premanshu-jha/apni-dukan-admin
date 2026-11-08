@@ -96,6 +96,7 @@ export type ChangeField =
   | 'udyamNumber'
   | 'ownerPhoto'
   | 'shopPhoto'
+  | 'shopVideo'
 
 export interface Change {
   field: ChangeField
@@ -147,6 +148,8 @@ export interface ShopDetail {
   pinMovedMetres: number | null
   previousOwnerPhotoUrl: string | null
   previousShopPhotoUrl: string | null
+  /** The salon video the owner recorded at registration (a signed link, valid at least 15 more minutes); null if none. */
+  videoUrl?: string | null
   /** Newest first, the first 50 entries. */
   timeline: TimelineEntry[]
   /** Where the next 50 start (GET /admin/shops/{id}/timeline with these); null when there are no more. */

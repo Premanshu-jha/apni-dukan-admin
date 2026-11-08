@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { BrowserContext, Route } from '@playwright/test'
 
 /**
@@ -43,9 +45,13 @@ export interface ShopExtra {
   pinMovedMetres: number | null
   previousOwnerPhotoUrl: string | null
   previousShopPhotoUrl: string | null
+  /** The salon video's signed link (salons), or null. */
+  videoUrl: string | null
   timeline: Json[]
 }
 
+/** A real 20-second video (64×64, VP9 in MP4). */
+const VIDEO = readFileSync(resolve('e2e/fixtures/salon-20s.mp4'))
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
@@ -105,6 +111,8 @@ function matches(ifNoneMatch: string | undefined, etag: string): boolean {
 }
 
 export class MockApi {
+  /** How many times a salon video link was signed (each read of a business page signs it again). */
+  videoSigs = 0
   user: MockUser = MockApi.completeUser('ADMIN')
   calls: Call[] = []
   shops: Json[] = []
@@ -212,6 +220,7 @@ export class MockApi {
       pinMovedMetres: null,
       previousOwnerPhotoUrl: null,
       previousShopPhotoUrl: null,
+      videoUrl: shop.type === 'SALON' ? `${PHOTOS}/salon-${shop.id as string}.mp4` : null,
       timeline: [{ at: ago(3 * 24 * 60), event: 'SUBMITTED', byName: 'Ravi Kumar', byAdmin: false, reason: null, note: null, checklist: [] }],
       ...extra,
     })
@@ -308,10 +317,17 @@ export class MockApi {
   }
 
   async attach(context: BrowserContext) {
-    await context.route(`${PHOTOS}/**`, (route) =>
-      // A 1×1 PNG, so photos load without the internet.
-      route.fulfill({ status: 200, headers: { 'Content-Type': 'image/png' }, body: Buffer.from(PNG, 'base64') }),
-    )
+    await context.route(`${PHOTOS}/**`, (route) => {
+      // A 1×1 PNG, so photos load without the internet; a salon video is a real little one (or a few bytes that
+      // aren't a video, for a link that can't play)
+      const path = new URL(route.request().url()).pathname
+      if (!path.endsWith('.mp4')) {
+        return route.fulfill({ status: 200, headers: { 'Content-Type': 'image/png' }, body: Buffer.from(PNG, 'base64') })
+      }
+      return path.includes('broken')
+        ? route.fulfill({ status: 200, headers: { 'Content-Type': 'video/mp4' }, body: Buffer.from('not a video') })
+        : route.fulfill({ status: 200, headers: { 'Content-Type': 'video/mp4' }, body: VIDEO })
+    })
     await context.route(`${API}/**`, async (route) => {
       if (this.offline) return route.abort('internetdisconnected')
       try {
@@ -540,6 +556,8 @@ export class MockApi {
           pinMovedMetres: x.pinMovedMetres,
           previousOwnerPhotoUrl: x.previousOwnerPhotoUrl,
           previousShopPhotoUrl: x.previousShopPhotoUrl,
+          // Signed again on each read, as the backend does (a new query each time)
+          videoUrl: x.videoUrl ? `${x.videoUrl}?sig=${++this.videoSigs}` : null,
           timeline: first.items,
           timelineNext: first.next,
         })
