@@ -1,4 +1,4 @@
-import { ADMIN_MESSAGES, ApiError, explain, fieldError, isNetwork, phoneError, retryDelay, wrongStatusText } from './errors'
+import { ADMIN_MESSAGES, ApiError, emailError, explain, fieldError, isNetwork, phoneError, retryDelay, wrongStatusText } from './errors'
 
 const err = (status: number, code: string, message = 'backend words', details: Record<string, unknown> = {}) =>
   new ApiError(status, { code, message, details })
@@ -12,7 +12,7 @@ describe('error explanations', () => {
       'Someone else decided meanwhile: it is now Closed by the owner.',
     )
     expect(explain(err(409, 'TEST_PHONE'))).toBe("This is a test number, or an account made in test mode, so it can't be an admin.")
-    for (const code of ['ALREADY_ADMIN', 'TEST_PHONE', 'CANT_REMOVE_SUPER_ADMIN', 'ADMIN_PHONE', 'REAL_ACCOUNT', 'ALREADY_TEST_PHONE', 'CUSTOMER_NOT_FOUND', 'STRIKE_NOT_FOUND', 'INVALID_PHONE', 'SUPER_ADMIN_ONLY']) {
+    for (const code of ['ALREADY_ADMIN', 'TEST_PHONE', 'CANT_REMOVE_SUPER_ADMIN', 'ADMIN_PHONE', 'REAL_ACCOUNT', 'ALREADY_TEST_PHONE', 'REAL_ACCOUNT_EMAIL', 'ALREADY_TEST_EMAIL', 'CUSTOMER_NOT_FOUND', 'STRIKE_NOT_FOUND', 'INVALID_PHONE', 'SUPER_ADMIN_ONLY']) {
       expect(explain(err(409, code))).toBe(ADMIN_MESSAGES[code])
       expect(ADMIN_MESSAGES[code].length).toBeGreaterThan(10)
     }
@@ -28,6 +28,9 @@ describe('error explanations', () => {
     expect(phoneError(err(400, 'INVALID_PHONE'))).toBe("That isn't a valid mobile number. Check the 10 digits.")
     expect(phoneError(err(400, 'VALIDATION_FAILED', 'x', { phone: 'is wrong' }))).toBe('is wrong')
     expect(phoneError(err(409, 'ALREADY_ADMIN'))).toBeUndefined()
+    expect(emailError(err(400, 'INVALID_EMAIL'))).toBe('Enter an email address, like name@gmail.com')
+    expect(emailError(err(400, 'VALIDATION_FAILED', 'x', { email: 'is too long' }))).toBe('is too long')
+    expect(emailError(err(409, 'ALREADY_TEST_EMAIL'))).toBeUndefined()
     expect(isNetwork(ApiError.network())).toBe(true)
     expect(isNetwork(err(503, 'SERVICE_BUSY'))).toBe(false)
   })

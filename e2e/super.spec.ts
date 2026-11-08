@@ -94,10 +94,8 @@ test('test mode: switch on for 1–8 hours, the red banner appears everywhere, t
   await signedIn(context, api, 'SUPER_ADMIN')
   await page.goto('/test-mode')
   for (const line of [
-    'Only numbers nobody has signed in with can be added as test numbers.',
-    /While test mode is on, a test number signs in with any 6-digit code \(no SMS is sent\)/,
-    /Then, for an email like name@example\.com, any 6-digit email code works too \(no email is\s+sent\)\. A real email address always needs the real email code\./,
-    /This only works for accounts made in test mode\. Account recovery and deleting an account always need the\s+real codes\./,
+    /Test numbers and test emails take any 6-digit code while test mode is on\. No SMS or email\s+is sent\./,
+    /Only numbers nobody has signed in with, and emails no real account has verified, can be added\. Recovery and\s+deleting an account always need real codes\./,
     'Test accounts are signed out when test mode ends or is switched off, or when their number is removed.',
   ]) {
     await expect(page.getByText(line)).toBeVisible()
@@ -163,6 +161,56 @@ test('test numbers: add with a label, the refusals in words, remove', async ({ p
   await expect(page.getByText('+91 90000 00099 is no longer a test number; its test account was signed out.')).toBeVisible()
   await expect(list).not.toContainText('Play review')
   expect(api.calledTimes('DELETE', '/api/v1/admin/test-mode/phones/9000000099')).toBe(1)
+})
+
+test('test emails: add with a label, the refusals in words, remove', async ({ page, context, api }) => {
+  api.testEmails.push({ email: 'qa@gmail.com', label: 'QA salon', addedAt: '2026-11-01T05:00:00Z', inUse: true })
+  await signedIn(context, api, 'SUPER_ADMIN')
+  await page.goto('/test-mode')
+  const list = page.getByRole('list', { name: 'Test emails' })
+  await expect(list).toContainText('qa@gmail.com')
+  await expect(list).toContainText('QA salon')
+  await expect(list).toContainText('In use')
+
+  await page.getByRole('button', { name: 'Add test email' }).click()
+  await expect(page.getByText('Enter an email address, like name@gmail.com')).toBeVisible()
+  await expect(page.getByText('Say whose email this is')).toBeVisible()
+  const email = page.getByLabel('Test email', { exact: true })
+  await email.fill('owner@gmail.com')
+  await page.getByLabel('Whose email').fill('Mine')
+  await page.getByRole('button', { name: 'Add test email' }).click()
+  await expect(page.getByText('That email belongs to a real account. Use an email nobody has verified on Clozest.')).toBeVisible()
+  await email.fill('QA@gmail.com')
+  await page.getByRole('button', { name: 'Add test email' }).click()
+  await expect(page.getByText('This email is already a test email.')).toBeVisible()
+  // The backend's own check of the address shows under the field
+  await email.fill('tester@gmail.c')
+  await page.getByRole('button', { name: 'Add test email' }).click()
+  await expect(page.getByText('Enter an email address, like name@gmail.com')).toBeVisible()
+  // A refusal for an email never shows under the test number's fields
+  await expect(page.locator('#test-phone-error')).toHaveCount(0)
+  await email.fill('  Tester.Two@Gmail.com ')
+  await page.getByLabel('Whose email').fill('Play review')
+  await page.getByRole('button', { name: 'Add test email' }).click()
+  await expect(page.getByText('tester.two@gmail.com is a test email now.')).toBeVisible()
+  await expect(list).toContainText('Play review')
+  await expect(list).toContainText('Not used yet')
+  await expect(email).toHaveValue('')
+  expect(api.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/test-mode/emails')).at(-1)?.body)
+    .toEqual({ email: 'tester.two@gmail.com', label: 'Play review' })
+
+  await page.getByRole('button', { name: 'Remove test email qa@gmail.com' }).click()
+  await expect(page.getByText('qa@gmail.com is no longer a test email.')).toBeVisible()
+  await expect(list).not.toContainText('QA salon')
+  expect(api.calledTimes('DELETE', '/api/v1/admin/test-mode/emails/qa%40gmail.com')).toBe(1)
+})
+
+test('test emails: a backend without the list shows none and the page still works', async ({ page, context, api }) => {
+  await signedIn(context, api, 'SUPER_ADMIN')
+  api.testEmailsMissing = true
+  await page.goto('/test-mode')
+  await expect(page.getByText('No test emails yet.')).toBeVisible()
+  await expect(page.getByText('No test numbers yet.')).toBeVisible()
 })
 
 test('the banner follows /admin/me by itself: re-read every minute, and on coming back to the app', async ({ page, context, api }) => {

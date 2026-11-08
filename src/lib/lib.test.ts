@@ -12,6 +12,7 @@ import {
   lettersOrDigits,
   searchable,
   checkStrikeReason,
+  checkTestEmail,
   checkTestPhone,
   decisionsFor,
   needsReason,
@@ -186,6 +187,10 @@ describe('decisions and form checks', () => {
     expect(checkTestPhone('+91 90000 00088', 'QA')).toEqual({})
     expect(checkTestPhone('9000000088', 'Q').label).toBe('Write at least 2 letters or digits')
     expect(checkTestPhone('9000000088', 'x'.repeat(61)).label).toMatch(/under 60/)
+    expect(checkTestEmail('tester', '')).toEqual({ email: 'Enter an email address, like name@gmail.com', label: 'Say whose email this is' })
+    expect(checkTestEmail(' Tester@Gmail.com ', 'QA')).toEqual({})
+    expect(checkTestEmail('a b@gmail.com', 'QA').email).toBeDefined()
+    expect(checkTestEmail('a@gmail.com', 'Q').label).toBe('Write at least 2 letters or digits')
     expect([0, 1, 8, 9, 2.5].map(validHours)).toEqual([false, true, true, false, false])
     expect(optional('  ')).toBeUndefined()
     expect(optional(' hi   there ')).toBe('hi there')

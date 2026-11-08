@@ -124,6 +124,11 @@ export class MockApi {
   ]
   testMode: { on: boolean; until: string | null; turnedOnByName: string | null } = { on: false, until: null, turnedOnByName: null }
   testPhones: Json[] = []
+  testEmails: Json[] = []
+  /** Answer test-mode state without `emails`, like a backend from before the list. */
+  testEmailsMissing = false
+  /** Emails verified by real accounts or admins: 409 REAL_ACCOUNT_EMAIL as a test email. */
+  realEmails = new Set<string>(['owner@gmail.com'])
   customers = new Map<string, { customerId: string; blockedUntil: string | null; strikes: Json[] }>()
   /** Every request fails as with no network. */
   offline = false
@@ -348,7 +353,8 @@ export class MockApi {
 
   private testState(): Json {
     this.testModeOn()
-    return { ...this.testMode, phones: this.testPhones }
+    if (this.testEmailsMissing) return { ...this.testMode, phones: this.testPhones }
+    return { ...this.testMode, phones: this.testPhones, emails: this.testEmails }
   }
 
   private async handle(route: Route) {
@@ -700,6 +706,27 @@ export class MockApi {
       if (this.testPhones.some((t) => t.phone === body.phone)) return fail(409, 'ALREADY_TEST_PHONE', 'Already a test number.')
       this.testPhones.push({ phone: body.phone, label: cleanText(body.label), addedAt: new Date().toISOString(), hasAccount: false })
       return ok(201, this.testState())
+    }
+    if (p === '/admin/test-mode/emails' && method === 'POST') {
+      if (!isSuper) return superOnly()
+      const email = String(body.email ?? '').trim().toLowerCase()
+      if (!/^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(email)) {
+        return fail(400, 'INVALID_EMAIL', 'Enter a valid email address')
+      }
+      const labelProblem = textProblem(body.label, 2, 60)
+      if (labelProblem) return invalid({ label: labelProblem })
+      if (this.realEmails.has(email) || email === String(this.user.email ?? '').toLowerCase()) {
+        return fail(409, 'REAL_ACCOUNT_EMAIL', 'That email belongs to a real account. Use an email nobody has verified on Clozest.')
+      }
+      if (this.testEmails.some((t) => t.email === email)) return fail(409, 'ALREADY_TEST_EMAIL', 'That email is a test email already.')
+      this.testEmails.push({ email, label: cleanText(body.label), addedAt: new Date().toISOString(), inUse: false })
+      return ok(201, this.testState())
+    }
+    const testEmail = p.match(/^\/admin\/test-mode\/emails\/([^/]+)$/)
+    if (testEmail && method === 'DELETE') {
+      if (!isSuper) return superOnly()
+      this.testEmails = this.testEmails.filter((t) => t.email !== decodeURIComponent(testEmail[1]).toLowerCase())
+      return ok(200, this.testState())
     }
     const testPhone = p.match(/^\/admin\/test-mode\/phones\/([^/]+)$/)
     if (testPhone && method === 'DELETE') {
