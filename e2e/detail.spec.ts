@@ -439,3 +439,54 @@ test('a hand-over in the timeline names the new owner', async ({ page, context, 
   await page.goto(`/shops/${shop.id}`)
   await expect(page.getByText('Handed over to Kavita Rao')).toBeVisible()
 })
+
+test('a salon’s page plays the owner’s salon video for the field team; a new one is named in what changed', async ({ page, context, api }) => {
+  const salon = api.addShop(
+    { name: 'Shine Unisex Salon', type: 'SALON' },
+    { approvedBefore: true, changes: [{ field: 'shopVideo', label: 'Salon video', before: null, after: null }] },
+  )
+  const noVideo = api.addShop({ name: 'Royal Cuts', type: 'SALON' }, { videoUrl: null })
+  const kirana = api.addShop({ name: 'Gupta General Store', type: 'KIRANA' })
+  await signedIn(context, api)
+
+  await page.goto(`/shops/${salon.id}`)
+  const video = page.getByRole('region', { name: 'Salon video' }).locator('video')
+  await expect(video).toHaveAttribute('src', new RegExp(`^${PHOTOS}/salon-${salon.id as string}\\.mp4\\?sig=\\d+$`))
+  await expect(video).toHaveAttribute('controls', '')
+  await expect(video).toHaveAttribute('playsinline', '')
+  await expect(video).toHaveAttribute('preload', 'metadata')
+  await expect(page.getByRole('region', { name: 'What changed' })).toContainText('The owner sent a new video. Watch it below.')
+
+  await page.goto(`/shops/${noVideo.id}`)
+  await expect(page.getByRole('region', { name: 'Salon video' })).toContainText('No video yet')
+
+  await page.goto(`/shops/${kirana.id}`)
+  await expect(page.getByRole('heading', { name: `#${kirana.shopCode} Gupta General Store` })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Salon video' })).toHaveCount(0)
+})
+
+test('the playing salon video keeps its link when the page refreshes every 4 minutes', async ({ page, context, api }) => {
+  const salon = api.addShop({ name: 'Shine Unisex Salon', type: 'SALON' })
+  await signedIn(context, api)
+  await page.clock.install()
+  await page.goto(`/shops/${salon.id}`)
+  const video = page.getByRole('region', { name: 'Salon video' }).locator('video')
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(0)
+  const src = await video.getAttribute('src')
+  const signed = api.videoSigs
+  await page.clock.fastForward('04:05')
+  await expect.poll(() => api.videoSigs).toBeGreaterThan(signed)   // the page was read again, with a new link
+  expect(await video.getAttribute('src')).toBe(src)
+})
+
+test('a salon video that can’t play here offers to open it on its own', async ({ page, context, api }) => {
+  const salon = api.addShop({ name: 'Shine Unisex Salon', type: 'SALON' }, { videoUrl: `${PHOTOS}/broken.mp4` })
+  await signedIn(context, api)
+  await page.goto(`/shops/${salon.id}`)
+  const section = page.getByRole('region', { name: 'Salon video' })
+  await expect(section).toContainText("This video can't play here.")
+  const open = section.getByRole('link', { name: 'Open video' })
+  await expect(open).toHaveAttribute('href', new RegExp(`^${PHOTOS}/broken\\.mp4\\?sig=`))
+  await expect(open).toHaveAttribute('target', '_blank')
+  await expect(open).toHaveAttribute('rel', /noopener/)
+})
