@@ -83,6 +83,9 @@ export const adminApi = {
   addTestPhone: (phone: string, label: string) =>
     write<TestModeState>('POST', `${A}/test-mode/phones`, { phone, label }),
   removeTestPhone: (phone: string) => write<TestModeState>('DELETE', `${A}/test-mode/phones/${encodeURIComponent(phone)}`),
+  addTestEmail: (email: string, label: string) =>
+    write<TestModeState>('POST', `${A}/test-mode/emails`, { email, label }),
+  removeTestEmail: (email: string) => write<TestModeState>('DELETE', `${A}/test-mode/emails/${encodeURIComponent(email)}`),
 }
 
 export const keys = {
