@@ -130,6 +130,18 @@ export function checkTestPhone(phone: string, label: string): { phone?: string; 
   return errors
 }
 
+/** Roughly an email address: something@something.something, no spaces (the backend checks it fully). */
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** A test email: an email address and a label of 2–60 (who or what it is for). */
+export function checkTestEmail(email: string, label: string): { email?: string; label?: string } {
+  const errors: { email?: string; label?: string } = {}
+  if (!EMAIL.test(email.trim())) errors.email = 'Enter an email address, like name@gmail.com'
+  const l = checkText(label, LABEL_MAX, 'Say whose email this is')
+  if (l) errors.label = l
+  return errors
+}
+
 export function validHours(h: number): boolean {
   return Number.isInteger(h) && h >= HOURS_MIN && h <= HOURS_MAX
 }
