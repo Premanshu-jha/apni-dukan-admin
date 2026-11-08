@@ -66,7 +66,14 @@ export function TestMode() {
           <li>
             While test mode is on, a test number signs in with <strong>any 6-digit code</strong> (no SMS is sent).
           </li>
-          <li>Email codes are always real, for test numbers too.</li>
+          <li>
+            Then, for an email like <strong>name@example.com</strong>, any 6-digit email code works too (no email is
+            sent). A real email address always needs the real email code.
+          </li>
+          <li>
+            This only works for accounts made in test mode. Account recovery and deleting an account always need the
+            real codes.
+          </li>
           <li>Test accounts are signed out when test mode ends or is switched off, or when their number is removed.</li>
         </ul>
       </Banner>

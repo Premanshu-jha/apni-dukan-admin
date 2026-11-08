@@ -241,6 +241,13 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.5.1 — 2026-11-08
+
+- The Test mode page now says test numbers can also use **any 6-digit email code** for an email like
+  `name@example.com` (no email is sent); a real email address still needs the real code; it only works for accounts made in
+  test mode, and recovery and deleting an account always need the real codes. Needs the backend's
+  "email step in OTP test mode"; with an older backend the email code stays real.
+
 ### 0.5.0 — 2026-11-08
 
 - The business page of a salon has a **Salon video** section: a player (`controls`, `playsinline`, metadata only until
