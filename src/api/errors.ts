@@ -64,6 +64,9 @@ export const ADMIN_MESSAGES: Record<string, string> = {
   ADMIN_PHONE: "This number belongs to someone on the team, and an admin's number can't be a test number.",
   REAL_ACCOUNT: 'That number already has a real account (a customer or a business). Use a number nobody has signed in with.',
   ALREADY_TEST_PHONE: 'This number is already a test number.',
+  REAL_ACCOUNT_EMAIL: 'That email belongs to a real account. Use an email nobody has verified on Clozest.',
+  ALREADY_TEST_EMAIL: 'This email is already a test email.',
+  INVALID_EMAIL: 'Enter an email address, like name@gmail.com',
   CUSTOMER_NOT_FOUND: 'No customer has an account with this number.',
   STRIKE_NOT_FOUND: 'This strike was already removed, maybe by someone else. The list now shows what is left.',
   INVALID_PHONE: "That isn't a valid mobile number. Check the 10 digits.",
@@ -82,6 +85,11 @@ export function wrongStatusText(e: unknown): string {
 export function phoneError(e: unknown): string | undefined {
   if (isApiError(e, 'INVALID_PHONE')) return ADMIN_MESSAGES.INVALID_PHONE
   return fieldError(e, 'phone')
+}
+
+export function emailError(e: unknown): string | undefined {
+  if (isApiError(e, 'INVALID_EMAIL')) return ADMIN_MESSAGES.INVALID_EMAIL
+  return fieldError(e, 'email')
 }
 
 /** A network failure or timeout: the call may or may not have reached the backend. */

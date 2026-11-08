@@ -212,9 +212,19 @@ export interface TestPhone {
   hasAccount: boolean
 }
 
+export interface TestEmail {
+  email: string
+  label: string
+  addedAt: string
+  /** Whether an account has verified it yet. */
+  inUse: boolean
+}
+
 export interface TestModeState {
   on: boolean
   until: string | null
   turnedOnByName: string | null
   phones: TestPhone[]
+  /** Missing from a backend older than the test email list. */
+  emails?: TestEmail[]
 }

@@ -241,6 +241,13 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.5.2 — 2026-11-08
+
+- **Test emails** on the Test mode page, like the test numbers: add an email with whose it is, see whether it is
+  in use, remove it. While test mode is on, a test account verifies a listed email with any 6-digit code (no email
+  is sent). The example.com rule is gone, and the help text says simply that test numbers and test emails take any
+  code. Needs the backend's "test emails" version; with an older backend the list stays empty.
+
 ### 0.5.1 — 2026-11-08
 
 - The Test mode page now says test numbers can also use **any 6-digit email code** for an email like
