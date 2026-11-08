@@ -208,7 +208,7 @@ path in `api/admin.ts` that re-reads `/admin/me` on 403 or 404.
 
 | Header | Value |
 | --- | --- |
-| `Content-Security-Policy` | `default-src 'self'`; scripts from the site (plus `https://challenges.cloudflare.com` when the Turnstile key is set, also its frame); API calls only to `VITE_API_URL` (was any https address); images from the site, `data:`, `blob:` and `PHOTO_ORIGIN` (was any https address); styles allow inline (the Turnstile widget); no plugins; `frame-ancestors 'none'` |
+| `Content-Security-Policy` | `default-src 'self'`; scripts from the site (plus `https://challenges.cloudflare.com` when the Turnstile key is set, also its frame); API calls only to `VITE_API_URL` (was any https address); images from the site, `data:`, `blob:` and `PHOTO_ORIGIN` (was any https address); video (the salon video) from the site and `PHOTO_ORIGIN`; styles allow inline (the Turnstile widget); no plugins; `frame-ancestors 'none'` |
 | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `X-Content-Type-Options` | `nosniff` |
@@ -235,10 +235,25 @@ script), runs `npm run build` and serves `dist/` with Caddy, using this repo's `
 every address that isn't a file gets `index.html` (single-page app), `/health` answers 200, and every answer carries
 the security headers. Keep the service's Start Command empty in Railway's settings: a start command turns Caddy (and
 the headers) off. Set `VITE_API_URL` and `VITE_TURNSTILE_SITE_KEY` as the service's variables (they are read at build
-time), optionally `PHOTO_ORIGIN` (default `https://*.r2.cloudflarestorage.com`, where signed photo links point). Then
+time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.cloudflarestorage.com`; default
+`https://*.r2.cloudflarestorage.com`, where signed photo and video links point). Then
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### 0.5.0 — 2026-11-08
+
+- The business page of a salon has a **Salon video** section: a player (`controls`, `playsinline`, metadata only until
+  played) for the short video the owner recorded at registration, so the field team can watch the salon before the
+  visit; "No video yet" when there is none. From the backend's `videoUrl` on `GET /admin/shops/{id}` (only there,
+  never in lists; customers never see it). A new video on a live salon is listed in "What changed" ("The owner sent
+  a new video. Watch it below."). Security headers: a new `media-src` allows playing it from `PHOTO_ORIGIN` (R2).
+  Needs the backend's salon video; with an older backend the section shows "No video yet".
+- The page reads a fresh link every 4 minutes, but the player keeps the address it loaded (a video being watched
+  isn't stopped); it takes the newest only before it loaded or after it failed. A video the browser can't play (a
+  phone's codec) shows "This video can't play here." with **Open video** (the same signed link, a new tab).
+- **In production set `PHOTO_ORIGIN` to the account's exact `https://<account>.r2.cloudflarestorage.com`**: it then
+  replaces the wildcard `https://*.r2.cloudflarestorage.com` in `img-src` and `media-src` (a unit test checks it).
 
 ### 0.4.1 — 2026-11-07
 
