@@ -70,7 +70,13 @@ export const ADMIN_MESSAGES: Record<string, string> = {
   CUSTOMER_NOT_FOUND: 'No customer has an account with this number.',
   STRIKE_NOT_FOUND: 'This strike was already removed, maybe by someone else. The list now shows what is left.',
   INVALID_PHONE: "That isn't a valid mobile number. Check the 10 digits.",
-  SUPER_ADMIN_ONLY: 'Only the super admin can do this.',
+  SUPER_ADMIN_ONLY: 'Only a super admin can do this.',
+  CANT_REMOVE_YOURSELF: "You can't remove yourself from the team. Ask another super admin.",
+  MEMBER_CHANGED: 'Someone changed this member after you opened it. Reload and try again.',
+  PHONE_IN_USE: 'Another Clozest account already uses this number.',
+  EMAIL_IN_USE: 'Another account already uses this email.',
+  TEST_EMAIL: 'This is a test email. Remove it from the test emails first, or use another.',
+  NOT_A_FIELD_AGENT: "That person isn't a field agent on the team any more. Reload the team and choose again.",
   OWN_SHOP:
     "You work in this business (as its owner, a helper or a barber), so you can't decide on it or write notes about it. Ask another admin.",
 }
@@ -124,6 +130,10 @@ const FIELD_NAMES: Record<string, string> = {
   label: 'The label',
   hours: 'The hours',
   name: 'The name',
+  email: 'The email',
+  pincodes: 'Pincodes:',
+  designation: 'The designation:',
+  role: 'The role:',
   q: 'The search:',
 }
 

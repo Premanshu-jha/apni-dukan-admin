@@ -3,6 +3,8 @@
 // Instants are ISO strings in UTC; phone numbers are 10 digits without +91.
 
 export type AdminRole = 'NONE' | 'ADMIN' | 'SUPER_ADMIN'
+/** An ADMIN's job title (a SUPER_ADMIN has none). FIELD_AGENT: visits only the businesses assigned to them. */
+export type Designation = 'FIELD_AGENT'
 
 export interface User {
   id: string
@@ -44,6 +46,8 @@ export interface AdminMe {
   name: string | null
   phone: string | null
   adminRole: AdminRole
+  /** An ADMIN's designation; null for a super admin. Missing from a backend older than field agents. */
+  designation?: Designation | null
   testMode: TestModeFlag
 }
 
@@ -82,6 +86,14 @@ export interface AdminShop {
   udyamNumber: string | null
   /** When it entered its current status (the waiting time; lists are sorted by it). */
   statusSince: string
+  /** The field agent who visits it; null when unassigned (missing from a backend older than field agents). */
+  assignedTo?: Assignee | null
+}
+
+export interface Assignee {
+  id: string
+  /** Null if they haven't set a name yet. */
+  name: string | null
 }
 
 export type ChangeField =
@@ -200,9 +212,45 @@ export interface TeamMember {
   userId: string
   name: string | null
   phone: string
+  email: string | null
+  /** False until they confirm it at their next sign-in (an email typed on the Team page). */
+  emailVerified: boolean
   adminRole: AdminRole
+  /** An ADMIN's designation; null for a super admin. */
+  designation: Designation | null
+  /** The pincodes a field agent covers, in order; empty for a super admin. */
+  pincodes: string[]
+  /** Businesses waiting for their visit. */
+  pendingVisits: number
   /** When they became an admin. */
   since: string
+  /** Send it back with an edit (409 MEMBER_CHANGED if someone changed them since). */
+  version: number
+}
+
+/** POST /admin/team, and PUT /admin/team/{id} with `version`. */
+export interface MemberIn {
+  phone: string
+  email: string
+  name: string
+  role: 'ADMIN' | 'SUPER_ADMIN'
+  /** Required for ADMIN; ignored for SUPER_ADMIN. */
+  designation: Designation | null
+  /** At least one for ADMIN; ignored for SUPER_ADMIN. */
+  pincodes: string[]
+}
+
+/** GET /admin/team/coverage: each covered pincode with the agents covering it. */
+export interface Covered {
+  pincode: string
+  agents: Array<{ userId: string; name: string | null; phone: string | null }>
+}
+
+/** POST /admin/assignments/move */
+export interface Moved {
+  moved: number
+  /** Businesses the new agent works in, left with the old one. */
+  stayed: number
 }
 
 export interface TestPhone {

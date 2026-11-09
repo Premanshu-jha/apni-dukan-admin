@@ -1,5 +1,5 @@
 import { howLong } from './time'
-import type { AdminRole, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry } from '../api/types'
+import type { AdminRole, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry, Designation } from '../api/types'
 
 export const SHOP_TYPES: ShopType[] = ['KIRANA', 'SALON']
 export const TYPE_LABELS: Record<ShopType, string> = { KIRANA: 'Kirana', SALON: 'Salon' }
@@ -115,3 +115,5 @@ export function eventLabel(e: Pick<TimelineEntry, 'event' | 'byName' | 'byAdmin'
 export const STRIKE_LABELS: Record<StrikeKind, string> = { NO_SHOW: 'No-show', LATE_CANCEL: 'Late cancel' }
 
 export const ROLE_LABELS: Record<AdminRole, string> = { NONE: 'Not on the team', ADMIN: 'Admin', SUPER_ADMIN: 'Super admin' }
+export const DESIGNATION_LABELS: Record<Designation, string> = { FIELD_AGENT: 'Field agent' }
+export const DESIGNATIONS: Designation[] = ['FIELD_AGENT']
