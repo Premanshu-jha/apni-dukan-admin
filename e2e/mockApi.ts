@@ -16,6 +16,8 @@ const P = '/api/v1'
 export type AdminRole = 'NONE' | 'ADMIN' | 'SUPER_ADMIN'
 export type Status = 'DRAFT' | 'PENDING_VISIT' | 'APPROVED' | 'SUSPENDED' | 'CLOSED'
 type Json = Record<string, unknown>
+/** An answer refusing a request, before it is sent. */
+type Refusal = { status: number; code: string; message: string; details: Json }
 
 export interface MockUser {
   id: string
@@ -81,6 +83,8 @@ export function cleanText(value: string): string {
 }
 
 const PHONE = /^[6-9]\d{9}$/
+/** Emails.normalize's rule (after trimming and lower-casing). */
+const EMAIL = /^[a-z0-9._%+-]{1,64}@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 
 /** Shops a list page returns (ShopReviewStore.PAGE). */
 const SHOPS_PAGE = 50
@@ -119,9 +123,15 @@ export class MockApi {
   extra = new Map<string, ShopExtra>()
   /** Shops (ids) the signed-in admin works in (owner, helper or barber): decisions and notes answer 403 OWN_SHOP. */
   memberOf = new Set<string>()
+  /** The team as GET /admin/team gives it (pendingVisits is counted from the shops when answering). */
   team: Json[] = [
-    { userId: 'u0', name: 'Meera Super', phone: '9000000001', adminRole: 'SUPER_ADMIN', since: '2026-10-01T05:00:00Z' },
+    MockApi.teamMember({ userId: 'u0', name: 'Meera Super', phone: '9000000001', adminRole: 'SUPER_ADMIN', since: '2026-10-01T05:00:00Z' }),
+    MockApi.teamMember({ userId: 'u5', name: 'Ravi Field', phone: '9000000005', pincodes: ['201309'], since: '2026-10-03T05:00:00Z' }),
   ]
+  /** Accounts by phone that aren't on the team (a customer, say): 409 PHONE_IN_USE when a member's phone moves there. */
+  otherPhones = new Set<string>(['9811122233'])
+  /** Verified emails of accounts not on the team: 409 EMAIL_IN_USE. */
+  otherEmails = new Set<string>(['owner@gmail.com'])
   testMode: { on: boolean; until: string | null; turnedOnByName: string | null } = { on: false, until: null, turnedOnByName: null }
   testPhones: Json[] = []
   testEmails: Json[] = []
@@ -166,6 +176,20 @@ export class MockApi {
   private access = new Map<string, AdminRole>()
   refreshTokens = new Map<string, 'live' | 'rotated'>()
 
+  /** A team member as the backend answers it; an ADMIN is a field agent. */
+  static teamMember(over: Json): Json {
+    const admin = (over.adminRole ?? 'ADMIN') === 'ADMIN'
+    return {
+      email: `${over.userId as string}@example.com`,
+      emailVerified: true,
+      adminRole: 'ADMIN',
+      designation: admin ? 'FIELD_AGENT' : null,
+      pincodes: [],
+      version: 0,
+      ...over,
+    }
+  }
+
   static completeUser(adminRole: AdminRole = 'ADMIN'): MockUser {
     return {
       id: 'u1',
@@ -181,13 +205,32 @@ export class MockApi {
   /** Makes this person's role on the backend change now (their token keeps the old one until refreshed). */
   setRole(role: AdminRole) {
     this.user = { ...this.user, adminRole: role, admin: role !== 'NONE' }
-    // One super admin: when this person is it, the default one steps aside.
-    this.team = this.team.filter((m) => m.userId !== this.user.id && !(role === 'SUPER_ADMIN' && m.adminRole === 'SUPER_ADMIN'))
-    if (role !== 'NONE') this.team.push(this.member())
+    // The signed-in person comes first in the default team when a super admin (the default one steps aside)
+    this.team = this.team.filter((m) => m.userId !== this.user.id && !(role === 'SUPER_ADMIN' && m.userId === 'u0'))
+    if (role !== 'NONE') this.team.unshift(this.member())
   }
 
   private member(): Json {
-    return { userId: this.user.id, name: this.user.name, phone: this.user.phone, adminRole: this.user.adminRole, since: '2026-10-02T05:00:00Z' }
+    return MockApi.teamMember({
+      userId: this.user.id,
+      name: this.user.name,
+      phone: this.user.phone,
+      email: this.user.email,
+      adminRole: this.user.adminRole,
+      pincodes: this.user.adminRole === 'ADMIN' ? ['201309'] : [],
+      since: '2026-10-02T05:00:00Z',
+    })
+  }
+
+  /** The signed-in person is a field agent who may see this shop (or a super admin, who sees all). */
+  private sees(shop: Json): boolean {
+    return this.user.adminRole === 'SUPER_ADMIN' || (shop.assignedTo as Json | null)?.id === this.user.id
+  }
+
+  /** Waiting businesses assigned to each member, as pendingVisits. */
+  private withPending(m: Json): Json {
+    const pendingVisits = this.shops.filter((s) => s.status === 'PENDING_VISIT' && (s.assignedTo as Json | null)?.id === m.userId).length
+    return { ...m, pendingVisits }
   }
 
   /** Adds a shop; `over` sets AdminShop fields, `extra` the page's other parts. */
@@ -214,6 +257,7 @@ export class MockApi {
       ownerPhone: '9811122233',
       gstin: null,
       udyamNumber: null,
+      assignedTo: { id: 'u5', name: 'Ravi Field' },
       ...over,
     }
     this.shops.push(shop)
@@ -458,6 +502,7 @@ export class MockApi {
         name: this.user.name,
         phone: this.user.phone,
         adminRole: this.user.adminRole,
+        designation: this.user.adminRole === 'ADMIN' ? 'FIELD_AGENT' : null,
         testMode: { on, until: on ? this.testMode.until : null },
       })
     }
@@ -467,7 +512,7 @@ export class MockApi {
         const c: Json = { FIRST_VISIT: 0, RECHECK: 0, SENT_BACK: 0, LIVE: 0, SUSPENDED: 0, CLOSED: 0 }
         for (const s of this.shops) {
           const g = this.groupOf(s)
-          if (s.type === type && g) c[g] = (c[g] as number) + 1
+          if (s.type === type && g && this.sees(s)) c[g] = (c[g] as number) + 1
         }
         return c
       }
@@ -499,6 +544,11 @@ export class MockApi {
       if (group === null) missing.group = 'is required'
       if (Object.keys(missing).length) return invalid(missing)
       if ((afterSince === null) !== (afterId === null)) return invalid({ afterId: 'send afterSince and afterId together' })
+      // A field agent always gets their own; a super admin may narrow to one agent's or to the unassigned ones
+      const assignedTo = url.searchParams.get('assignedTo') || null
+      const unassigned = url.searchParams.get('unassigned') === 'true'
+      if (assignedTo !== null && unassigned) return invalid({ unassigned: 'send assignedTo or unassigned, not both' })
+      if (unassigned && group !== 'FIRST_VISIT' && group !== 'RECHECK') return invalid({ unassigned: 'only for FIRST_VISIT and RECHECK' })
       // ShopAdminService.requireSearchable: 1 or 2 characters (code points) that aren't a shop number are refused
       const typed = (url.searchParams.get('q') ?? '').trim()
       if (typed && [...typed].length < 3 && !/^#?\d+$/.test(typed)) return invalid({ q: 'type at least 3 letters' })
@@ -511,7 +561,12 @@ export class MockApi {
       const number = q.replace(/^#/, '')
       const digits = q.replace(/^\+91/, '').replace(/[\s-]/g, '')
       const list = this.shops
-        .filter((s) => s.type === type && this.groupOf(s) === group)
+        .filter((s) => s.type === type && this.groupOf(s) === group && this.sees(s))
+        .filter((s) => {
+          if (!isSuper) return true
+          const who = (s.assignedTo as Json | null)?.id ?? null
+          return unassigned ? who === null : assignedTo === null || who === assignedTo
+        })
         .filter((s) => {
           if (!q) return true
           if (/^\d+$/.test(number) && String(s.shopCode) === number) return true
@@ -538,7 +593,7 @@ export class MockApi {
       if (afterSeq !== null && !/^-?\d+$/.test(afterSeq)) return unreadable(afterSeq, 'afterSeq')
       if ((afterAt === null) !== (afterSeq === null)) return invalid({ afterSeq: 'send afterAt and afterSeq together' })
       const shop = this.shops.find((s) => s.id === timelinePath[1])
-      if (!shop) return fail(404, 'NOT_FOUND', 'No such shop.')
+      if (!shop || !this.sees(shop)) return fail(404, 'NOT_FOUND', 'No such shop.')
       if (afterAt !== null && this.failTimelinePages > 0) {
         this.failTimelinePages -= 1
         return fail(500, 'INTERNAL_ERROR', 'Something went wrong on our side.')
@@ -546,12 +601,49 @@ export class MockApi {
       return ok(200, this.timelinePage(shop.id as string, afterAt === null ? null : { at: micros(afterAt), seq: Number(afterSeq) }))
     }
 
+    const assignPath = p.match(/^\/admin\/shops\/([^/]+)\/assign$/)
+    if (assignPath && method === 'POST') {
+      // ShopAssignments.assign: super admins; the shop (404), waiting (409 WRONG_STATUS), a field agent (400), not
+      // one who works in it (409 OWN_SHOP); the same agent again changes nothing
+      if (!isSuper) return superOnly()
+      const shop = this.shops.find((s) => s.id === assignPath[1])
+      if (!shop) return fail(404, 'NOT_FOUND', 'No such shop.')
+      if (shop.status !== 'PENDING_VISIT') return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
+      const agent = this.team.find((m) => m.userId === body?.adminId && m.adminRole === 'ADMIN')
+      if (!agent) return fail(400, 'NOT_A_FIELD_AGENT', "That person isn't a field agent on the team.")
+      if (this.agentWorksIn.has(`${agent.userId as string}:${shop.id as string}`)) {
+        return fail(409, 'OWN_SHOP', 'That field agent works in this business, so they can\'t visit it. Choose someone else.')
+      }
+      shop.assignedTo = { id: agent.userId, name: agent.name }
+      return ok(204)
+    }
+    if (p === '/admin/assignments/move' && method === 'POST') {
+      if (!isSuper) return superOnly()
+      if (body?.fromAdminId === body?.toAdminId) return invalid({ toAdminId: 'choose someone else' })
+      const agent = this.team.find((m) => m.userId === body?.toAdminId && m.adminRole === 'ADMIN')
+      if (!agent) return fail(400, 'NOT_A_FIELD_AGENT', "That person isn't a field agent on the team.")
+      let moved = 0
+      let stayed = 0
+      for (const s of this.shops) {
+        if (s.status !== 'PENDING_VISIT' || (s.assignedTo as Json | null)?.id !== body.fromAdminId) continue
+        if (this.agentWorksIn.has(`${agent.userId as string}:${s.id as string}`)) stayed++
+        else {
+          s.assignedTo = { id: agent.userId, name: agent.name }
+          moved++
+        }
+      }
+      return ok(200, { moved, stayed })
+    }
+
     const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|notes))?$/)
     if (shopPath) {
-      const shop = this.shops.find((s) => s.id === shopPath[1])
-      if (!shop) return fail(404, 'NOT_FOUND', 'No such shop.')
-      const x = this.extra.get(shop.id as string)!
       const action = shopPath[2]
+      // ShopAdminService: suspending and reinstating are for super admins (checked first), then a field agent sees
+      // only their own (404 for any other, as if it didn't exist)
+      if ((action === 'suspend' || action === 'reinstate') && method === 'POST' && !isSuper) return superOnly()
+      const shop = this.shops.find((s) => s.id === shopPath[1])
+      if (!shop || !this.sees(shop)) return fail(404, 'NOT_FOUND', 'No such shop.')
+      const x = this.extra.get(shop.id as string)!
       if (!action && method === 'GET') {
         // The first 50, and where the next 50 start (null when there are no more)
         const first = this.timelinePage(shop.id as string, null)
@@ -635,6 +727,7 @@ export class MockApi {
     }
 
     // ---------- support ----------
+    if (p.startsWith('/admin/salon/strikes') && !isSuper) return superOnly()
     if (p === '/admin/salon/strikes/lookup' && method === 'POST') {
       if (!PHONE.test(body.phone ?? '')) return fail(400, 'INVALID_PHONE', 'That is not a valid mobile number.')
       const c = this.customers.get(body.phone)
@@ -659,26 +752,78 @@ export class MockApi {
     // ---------- super admin only ----------
     if (p === '/admin/team' && method === 'GET') {
       if (!isSuper) return superOnly()
-      return ok(200, [...this.team].sort((a, b) => Number(b.adminRole === 'SUPER_ADMIN') - Number(a.adminRole === 'SUPER_ADMIN')))
+      return ok(200, [...this.team].sort((a, b) => Number(b.adminRole === 'SUPER_ADMIN') - Number(a.adminRole === 'SUPER_ADMIN')).map((m) => this.withPending(m)))
+    }
+    if (p === '/admin/team/coverage' && method === 'GET') {
+      if (!isSuper) return superOnly()
+      const by = new Map<string, Json[]>()
+      for (const m of this.team) for (const pin of m.pincodes as string[]) by.set(pin, [...(by.get(pin) ?? []), { userId: m.userId, name: m.name, phone: m.phone }])
+      return ok(200, [...by.keys()].sort().map((pincode) => ({ pincode, agents: by.get(pincode) })))
     }
     if (p === '/admin/team' && method === 'POST') {
+      // AdminTeamService.add, in its order: the fields; a listed test number; a test email; another account's email;
+      // already on the team; an account made in test mode
       if (!isSuper) return superOnly()
-      if (!PHONE.test(body.phone ?? '')) return fail(400, 'INVALID_PHONE', 'That is not a valid mobile number.')
-      if (this.team.some((m) => m.phone === body.phone)) return fail(409, 'ALREADY_ADMIN', 'This number is already an admin.')
-      if (this.testPhones.some((t) => t.phone === body.phone) || this.testAccounts.has(body.phone)) {
-        return fail(409, 'TEST_PHONE', "A test number, or an account made in test mode, can't be an admin.")
+      const checked = this.checkMember(body)
+      if (checked.error) return fail(checked.error.status, checked.error.code, checked.error.message, checked.error.details)
+      const email = checked.member.email as string
+      if (this.testPhones.some((t) => t.phone === checked.phone)) return fail(409, 'TEST_PHONE', 'That is a test number. Remove it from the test numbers first.')
+      if (this.testEmails.some((t) => t.email === email)) return fail(409, 'TEST_EMAIL', 'That is a test email.')
+      const existing = this.team.find((m) => m.phone === checked.phone)
+      if (this.emailOfAnother(email, existing ? (existing.userId as string) : null)) {
+        return fail(409, 'EMAIL_IN_USE', 'This email is already used by another account')
       }
-      const m = { userId: `u${++this.n}`, name: null, phone: body.phone, adminRole: 'ADMIN', since: new Date().toISOString() }
+      if (existing) return fail(409, 'ALREADY_ADMIN', 'That person is an admin already.')
+      if (this.testAccounts.has(checked.phone)) return fail(409, 'TEST_PHONE', "That number's account was made in test mode.")
+      const m = MockApi.teamMember({ userId: `u${++this.n}`, ...checked.member, emailVerified: false, since: new Date().toISOString() })
       this.team.push(m)
-      return ok(201, m)
+      this.pickUpUnassigned(m, m.pincodes as string[])
+      return ok(201, this.withPending(m))
     }
     const member = p.match(/^\/admin\/team\/([^/]+)$/)
+    if (member && method === 'PUT') {
+      // AdminTeamService.edit, in its order: the fields; on the team (404); the version; a new phone (test number,
+      // another account's); a new email (test email, another account's)
+      if (!isSuper) return superOnly()
+      const checked = this.checkMember(body)
+      if (checked.error) return fail(checked.error.status, checked.error.code, checked.error.message, checked.error.details)
+      const m = this.team.find((t) => t.userId === member[1])
+      if (!m) return fail(404, 'NOT_FOUND', 'No such admin.')
+      if (body.version !== m.version) return fail(409, 'MEMBER_CHANGED', 'Someone changed this member after you opened it. Reload and try again.')
+      const newPhone = checked.phone !== m.phone
+      if (newPhone && this.testPhones.some((t) => t.phone === checked.phone)) return fail(409, 'TEST_PHONE', 'That is a test number. Use another number.')
+      if (newPhone && (this.otherPhones.has(checked.phone) || this.team.some((t) => t !== m && t.phone === checked.phone))) {
+        return fail(409, 'PHONE_IN_USE', 'Another Clozest account already uses this phone number.')
+      }
+      const email = checked.member.email as string
+      const newEmail = email !== String(m.email ?? '').toLowerCase()
+      if (newEmail && this.testEmails.some((t) => t.email === email)) return fail(409, 'TEST_EMAIL', 'That is a test email.')
+      if (newEmail && this.emailOfAnother(email, m.userId as string)) return fail(409, 'EMAIL_IN_USE', 'This email is already used by another account')
+      const removed = (m.pincodes as string[]).filter((pin) => !(checked.member.pincodes as string[]).includes(pin))
+      const added = (checked.member.pincodes as string[]).filter((pin) => !(m.pincodes as string[]).includes(pin))
+      const wasAgent = m.adminRole === 'ADMIN'
+      Object.assign(m, checked.member, { version: (m.version as number) + 1, emailVerified: newEmail ? false : m.emailVerified })
+      // The pending businesses they no longer cover: to another agent covering the pincode, else Unassigned
+      if (wasAgent && (m.adminRole !== 'ADMIN' || removed.length)) this.reassignFrom(m, m.adminRole === 'ADMIN' ? removed : null)
+      if (m.adminRole === 'ADMIN') this.pickUpUnassigned(m, added)
+      if (m.userId === this.user.id) {
+        // The signed-in person: /admin/me answers the new role at once; a new phone or email ends every session
+        this.user = { ...this.user, adminRole: m.adminRole as AdminRole, admin: true, phone: m.phone as string, email: m.email as string }
+        if (newPhone || newEmail) {
+          this.expireAccess()
+          for (const k of this.refreshTokens.keys()) this.refreshTokens.set(k, 'rotated')
+        }
+      }
+      return ok(200, this.withPending(m))
+    }
     if (member && method === 'DELETE') {
       if (!isSuper) return superOnly()
       const m = this.team.find((t) => t.userId === member[1])
       if (!m) return fail(404, 'NOT_FOUND', 'No such admin.')
-      if (m.adminRole === 'SUPER_ADMIN') return fail(409, 'CANT_REMOVE_SUPER_ADMIN', "The super admin can't be removed.")
+      if (m.userId === this.user.id) return fail(409, 'CANT_REMOVE_YOURSELF', "You can't remove yourself. Ask another super admin.")
       this.team = this.team.filter((t) => t !== m)
+      m.adminRole = 'NONE'
+      this.reassignFrom(m)
       return ok(204)
     }
     if (p === '/admin/test-mode') {
@@ -736,6 +881,82 @@ export class MockApi {
     }
 
     return fail(404, 'NOT_FOUND', `No route ${method} ${p}`)
+  }
+
+  /** Field agents who work in a shop ("agentId:shopId"): never assigned it (409 OWN_SHOP). */
+  agentWorksIn = new Set<string>()
+
+  /** AdminTeamService.clean: the add/edit form's checks, field by field (a super admin's pincodes are ignored). */
+  private checkMember(body: Json): { error?: Refusal; phone: string; member: Json } {
+    const errors: Json = {}
+    const digits = String(body.phone ?? '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '').replace(/^0(?=\d{10}$)/, '')
+    if (!PHONE.test(digits)) errors.phone = 'enter a 10-digit Indian mobile number'
+    // Emails.normalize: trimmed, lower case; local part, dot-separated labels, a 2+ letter top level
+    const email = String(body.email ?? '').trim().toLowerCase()
+    if (!EMAIL.test(email) || email.length > 254) errors.email = 'enter a valid email address'
+    if (textProblem(body.name, 2, 60)) errors.name = 'enter a name of 2 to 60 letters'
+    const role = body.role
+    if (role !== 'ADMIN' && role !== 'SUPER_ADMIN') errors.role = 'choose Admin or Super admin'
+    let pincodes: string[] = []
+    if (role === 'ADMIN') {
+      if (body.designation !== 'FIELD_AGENT') errors.designation = 'choose a designation'
+      const list = Array.isArray(body.pincodes) ? (body.pincodes as unknown[]).map((x) => String(x ?? '').trim()) : []
+      const bad = list.filter((x) => !/^[1-9]\d{5}$/.test(x))
+      pincodes = [...new Set(list)].sort()
+      if (bad.length) errors.pincodes = `not valid pincodes: ${bad.slice(0, 10).join(', ')}`
+      else if (!list.length) errors.pincodes = 'add at least one pincode'
+      else if (pincodes.length > 300) errors.pincodes = 'at most 300 pincodes'
+    }
+    if (Object.keys(errors).length) {
+      return { error: { status: 400, code: 'VALIDATION_FAILED', message: 'Some fields are not valid', details: errors }, phone: digits, member: {} }
+    }
+    return {
+      phone: digits,
+      member: { phone: digits, email, name: cleanText(String(body.name)), adminRole: role, designation: role === 'ADMIN' ? 'FIELD_AGENT' : null, pincodes },
+    }
+  }
+
+  /** Someone else's verified email (a customer's, another member's): 409 EMAIL_IN_USE. */
+  private emailOfAnother(email: string, self: string | null): boolean {
+    const holder = this.team.find((m) => String(m.email ?? '').toLowerCase() === email && m.emailVerified)
+    return this.otherEmails.has(email) || (holder !== undefined && holder.userId !== self)
+  }
+
+  /** ShopAssignments.coverageAdded: businesses waiting with nobody in these pincodes go to this agent. */
+  private pickUpUnassigned(m: Json, pincodes: string[]) {
+    if (m.adminRole !== 'ADMIN') return
+    for (const s of this.shops) {
+      if (s.status === 'PENDING_VISIT' && !s.assignedTo && pincodes.includes(s.pincode as string)) {
+        const next = this.pick(s, null)
+        if (next) s.assignedTo = { id: next.userId, name: next.name }
+      }
+    }
+  }
+
+  /**
+   * ShopAssignments.coverageChanged: this member's waiting businesses in the pincodes taken away (all, when `removed`
+   * is null) go by the rule; one a super admin sent them elsewhere stays.
+   */
+  private reassignFrom(m: Json, removed: string[] | null = null) {
+    for (const s of this.shops) {
+      if (s.status !== 'PENDING_VISIT' || (s.assignedTo as Json | null)?.id !== m.userId) continue
+      if (removed !== null && !removed.includes(s.pincode as string)) continue
+      if (m.adminRole === 'ADMIN' && (m.pincodes as string[]).includes(s.pincode as string)) continue
+      const next = this.pick(s, m)
+      s.assignedTo = next ? { id: next.userId, name: next.name } : null
+    }
+  }
+
+  /**
+   * ShopAssignmentStore.pick: a field agent covering the business's pincode (not `except`, never one who works in it),
+   * the fewest waiting (this business not counted), the longest on the team on a tie.
+   */
+  private pick(shop: Json, except: Json | null): Json | undefined {
+    const waiting = (a: Json) => this.shops.filter((x) => x !== shop && x.status === 'PENDING_VISIT' && (x.assignedTo as Json | null)?.id === a.userId).length
+    return this.team
+      .filter((a) => a !== except && a.adminRole === 'ADMIN' && (a.pincodes as string[]).includes(shop.pincode as string))
+      .filter((a) => !this.agentWorksIn.has(`${a.userId as string}:${shop.id as string}`))
+      .sort((a, b) => waiting(a) - waiting(b) || String(a.since).localeCompare(String(b.since)))[0]
   }
 
   /**

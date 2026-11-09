@@ -156,7 +156,7 @@ test('More shows the name, phone and role; sign-out is immediate (even on a slow
   await page.getByRole('link', { name: 'More' }).click()
   await expect(page.getByText('Asha Field')).toBeVisible()
   await expect(page.getByText('+91 98480 12345')).toBeVisible()
-  await expect(page.getByText('Admin', { exact: true })).toBeVisible()
+  await expect(page.getByText('Super admin', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Sign out' }).click()
   // At once: not after the 10 s logout call
   await expect(page).toHaveURL(/\/signin$/, { timeout: 2000 })
@@ -187,7 +187,8 @@ test('a page that does not exist says so', async ({ page, context, api }) => {
 })
 
 test('a shop link opened while signed out is kept by the guard and opened after sign-in', async ({ page, api }) => {
-  const shop = api.addShop({ name: 'Gupta General Store' })
+  // Assigned to this field agent, so it is theirs to open
+  const shop = api.addShop({ name: 'Gupta General Store', assignedTo: { id: 'u1', name: 'Asha Field' } })
   api.user = MockApi.completeUser('ADMIN')
   api.setRole('ADMIN')
   await page.goto(`/shops/${shop.id}`)

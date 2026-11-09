@@ -1,4 +1,5 @@
 import { expect, signedIn, test } from './helpers'
+import { MockApi } from './mockApi'
 
 // The smallest common Android width
 test.use({ viewport: { width: 360, height: 740 } })
@@ -22,7 +23,7 @@ test('at 360px a 40-letter name with no spaces and a long URL in a note never sc
       timeline: [{ at: new Date().toISOString(), event: 'NOTE', byName: LONG, byAdmin: true, reason: URL_NOTE, note: URL_NOTE, checklist: [] }],
     },
   )
-  api.team.push({ userId: 'u7', name: LONG, phone: '9000000007', adminRole: 'ADMIN', since: '2026-10-05T05:00:00Z' })
+  api.team.push(MockApi.teamMember({ userId: 'u7', name: LONG, phone: '9000000007', pincodes: Array.from({ length: 40 }, (_, i) => String(500001 + i)), since: '2026-10-05T05:00:00Z' }))
   api.testPhones.push({ phone: '9000000099', label: LONG, addedAt: '2026-11-01T05:00:00Z', hasAccount: false })
   api.user = { ...api.user, name: LONG }
   await signedIn(context, api, 'SUPER_ADMIN')
@@ -41,7 +42,7 @@ test('at 360px a 40-letter name with no spaces and a long URL in a note never sc
   await noSidewaysScroll(page)
   await page.keyboard.press('Escape')
 
-  for (const path of ['/team', '/test-mode', '/more']) {
+  for (const path of ['/team', '/team/u7', '/team?view=coverage', '/test-mode', '/more']) {
     await page.goto(path)
     await expect(page.getByText(LONG).first()).toBeVisible()
     await noSidewaysScroll(page)
