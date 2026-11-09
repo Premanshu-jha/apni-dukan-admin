@@ -3,11 +3,17 @@ import { useDashboard } from '../../api/admin'
 import { explain } from '../../api/errors'
 import type { ShopType } from '../../api/types'
 import { Tabs } from '../../components/Tabs'
+import { useAdmin } from '../../app/guards'
 import { Banner, ErrorState, Loading, Page } from '../../components/ui'
+import { isSuperAdmin } from '../../lib/roles'
 import { GROUP_LABELS, GROUPS, isShopType, SHOP_TYPES, TYPE_LABELS } from '../../lib/labels'
 
-/** The six counts for kirana or salon; each opens its list. The tab is kept in the address (?type=SALON). */
+/**
+ * The six counts for kirana or salon; each opens its list. The tab is kept in the address (?type=SALON). A field
+ * agent's counts are only the businesses assigned to them.
+ */
 export function Dashboard() {
+  const superAdmin = isSuperAdmin(useAdmin().adminRole)
   const [params, setParams] = useSearchParams()
   const raw = params.get('type')
   const type: ShopType = isShopType(raw) ? raw : 'KIRANA'
@@ -15,6 +21,7 @@ export function Dashboard() {
 
   return (
     <Page title="Businesses">
+      {!superAdmin && <p className="text-sm text-muted">Only the businesses assigned to you (by the pincodes you cover).</p>}
       <Tabs
         label="Business type"
         value={type}
