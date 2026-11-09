@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { createContext, useContext, useEffect, useRef } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
-import { useMe } from '../api/admin'
+import { keys, useMe } from '../api/admin'
 import { ApiError, messageOf } from '../api/errors'
 import type { AdminMe } from '../api/types'
 import { TestModeBanner } from '../components/TestModeBanner'
@@ -77,6 +78,19 @@ export function notTeamAnymore(e: unknown): boolean {
  */
 export function AdminGate() {
   const me = useMe()
+  const qc = useQueryClient()
+  // A field agent and a super admin see different businesses under the same addresses: when the role changes,
+  // what was read under the old one is forgotten, so nothing of it shows under the new one
+  const role = me.data?.adminRole
+  const lastRole = useRef(role)
+  useEffect(() => {
+    if (role && lastRole.current && role !== lastRole.current) {
+      qc.resetQueries({ queryKey: keys.dashboard })
+      qc.resetQueries({ queryKey: keys.shops })
+      qc.resetQueries({ queryKey: keys.shopPages })
+    }
+    if (role) lastRole.current = role
+  }, [role, qc])
   if (me.isPending) return <Loading />
   if (me.isError && !me.data) {
     if (notTeamAnymore(me.error)) return <NotTeam onRecheck={() => void me.refetch()} />
@@ -93,7 +107,7 @@ export function AdminGate() {
   )
 }
 
-/** Team and Test mode: the super admin only. An admin who types the address goes to the dashboard. */
+/** Support, Team and Test mode: super admins only. A field agent who types the address goes to the dashboard. */
 export function SuperAdminOnly() {
   const me = useAdmin()
   if (!isSuperAdmin(me.adminRole)) return <Navigate to="/" replace />

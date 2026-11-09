@@ -2,6 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router'
 import { adminApi, keys, useEarlierTimeline, useShopDetail } from '../../api/admin'
+import { useAdmin } from '../../app/guards'
+import { isSuperAdmin } from '../../lib/roles'
+import { AssignSheet } from './AssignSheet'
 import { ADMIN_MESSAGES, explain, isApiError, isNetwork, wrongStatusText } from '../../api/errors'
 import type { AdminShop, Change, ShopDetail as Detail, ShopStatus, TimelineEntry, TimelineNext } from '../../api/types'
 import { Photo } from '../../components/Photo'
@@ -32,8 +35,9 @@ const DONE_TEXT: Record<Decision, string> = {
 export function ShopDetail() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
+  const superAdmin = isSuperAdmin(useAdmin().adminRole)
   const detail = useShopDetail(id)
-  const [open, setOpen] = useState<{ decision: Decision; version: number } | 'note' | null>(null)
+  const [open, setOpen] = useState<{ decision: Decision; version: number } | 'note' | 'assign' | null>(null)
   const [drafts, setDrafts] = useState<Partial<Record<Decision, Draft>>>({})
   const [notice, setNotice] = useState<string | null>(null)
   /**
@@ -128,8 +132,8 @@ export function ShopDetail() {
     }
   }
 
-  const decisions = decisionsFor(shop.status)
-  const current = open !== null && open !== 'note' ? open : null
+  const decisions = decisionsFor(shop.status, superAdmin)
+  const current = open !== null && open !== 'note' && open !== 'assign' ? open : null
 
   return (
     <Page
@@ -176,6 +180,26 @@ export function ShopDetail() {
         {shop.group && <Pill tone="muted">{GROUP_LABELS[shop.group]}</Pill>}
         <Pill tone="muted">{TYPE_LABELS[shop.type]}</Pill>
       </div>
+      {superAdmin && shop.assignedTo !== undefined && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm">
+          <p className="min-w-0 [overflow-wrap:anywhere]">
+            {shop.assignedTo ? (
+              <>
+                Visit by <span className="font-semibold">{shop.assignedTo.name || 'a field agent with no name yet'}</span>
+              </>
+            ) : shop.status === 'PENDING_VISIT' ? (
+              <span className="text-warn">Unassigned: no field agent can take {shop.pincode}</span>
+            ) : (
+              <span className="text-muted">No field agent</span>
+            )}
+          </p>
+          {shop.status === 'PENDING_VISIT' && (
+            <Button variant="secondary" className="shrink-0 text-sm" disabled={stale !== null} onClick={() => setOpen('assign')}>
+              {shop.assignedTo ? 'Reassign' : 'Assign'}
+            </Button>
+          )}
+        </div>
+      )}
       {shop.statusReason && (
         <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
           The owner was told: <span className="text-ink">"{shop.statusReason}"</span>
@@ -246,6 +270,26 @@ export function ShopDetail() {
           onDone={(s) => decided(current.decision, s)}
           onConflict={(c, e) => void conflicted(c, e)}
           onUncertain={() => uncertain(current.decision)}
+        />
+      )}
+      {open === 'assign' && (
+        <AssignSheet
+          shop={shop}
+          onClose={() => setOpen(null)}
+          onDone={(name) => {
+            setOpen(null)
+            setNotice(`Assigned to ${name}. They got a message.`)
+            refreshAll()
+            void qc.invalidateQueries({ queryKey: keys.team })   // the waiting counts
+          }}
+          onRefused={(e) => {
+            refreshAll()
+            if (isApiError(e, 'WRONG_STATUS')) {
+              // Decided meanwhile: nothing to assign any more; the page re-reads and says what it is now
+              setOpen(null)
+              setWarning(wrongStatusText(e))
+            }
+          }}
         />
       )}
       {open === 'note' && (

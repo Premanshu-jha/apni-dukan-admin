@@ -10,6 +10,7 @@ import { Dashboard } from '../features/shops/Dashboard'
 import { ShopDetail } from '../features/shops/ShopDetail'
 import { ShopList } from '../features/shops/ShopList'
 import { Support } from '../features/support/Support'
+import { AddMember, EditMember } from '../features/team/MemberForm'
 import { Team } from '../features/team/Team'
 import { TestMode } from '../features/testmode/TestMode'
 import { AdminGate, FinishingProfile, SignedIn, SignedOutOnly, SuperAdminOnly } from './guards'
@@ -36,10 +37,12 @@ export function App() {
             <Route index element={<Dashboard />} />
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shops/:id" element={<ShopDetail />} />
-            <Route path="/support" element={<Support />} />
             <Route path="/more" element={<More />} />
             <Route element={<SuperAdminOnly />}>
+              <Route path="/support" element={<Support />} />
               <Route path="/team" element={<Team />} />
+              <Route path="/team/new" element={<AddMember />} />
+              <Route path="/team/:id" element={<EditMember />} />
               <Route path="/test-mode" element={<TestMode />} />
             </Route>
             <Route

@@ -25,8 +25,11 @@ export const test = base.extend<{ api: MockApi; cspClean: void }>({
 })
 export { expect }
 
-/** Starts the test already signed in (complete profile) with this admin role. */
-export async function signedIn(context: BrowserContext, api: MockApi, role: AdminRole = 'ADMIN') {
+/**
+ * Starts the test already signed in (complete profile) with this admin role. A super admin by default: they see every
+ * business (a field agent, ADMIN, sees only those assigned to them; see fieldagent.spec.ts).
+ */
+export async function signedIn(context: BrowserContext, api: MockApi, role: AdminRole = 'SUPER_ADMIN') {
   api.user = MockApi.completeUser(role)
   api.setRole(role)
   const session = api.savedSession()
@@ -39,7 +42,7 @@ export async function signedIn(context: BrowserContext, api: MockApi, role: Admi
 }
 
 /** Signed in and on the dashboard. */
-export async function atDashboard(page: Page, context: BrowserContext, api: MockApi, role: AdminRole = 'ADMIN') {
+export async function atDashboard(page: Page, context: BrowserContext, api: MockApi, role: AdminRole = 'SUPER_ADMIN') {
   await signedIn(context, api, role)
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()

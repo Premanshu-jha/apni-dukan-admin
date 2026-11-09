@@ -20,13 +20,16 @@ export interface Tab {
   icon: string
 }
 
-/** The bottom bar: Team and Test mode only for the super admin. */
+/**
+ * The bottom bar. A field agent (ADMIN) sees only the businesses assigned to them; Support, Team and Test mode are
+ * for super admins.
+ */
 export function tabsFor(role: AdminRole): Tab[] {
   return [
     { to: '/', label: 'Businesses', icon: '▦' },
-    { to: '/support', label: 'Support', icon: '☏' },
     ...(isSuperAdmin(role)
       ? [
+          { to: '/support', label: 'Support', icon: '☏' },
           { to: '/team', label: 'Team', icon: '☺' },
           { to: '/test-mode', label: 'Test mode', icon: '⚑' },
         ]

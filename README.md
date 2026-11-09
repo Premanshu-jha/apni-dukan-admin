@@ -8,8 +8,8 @@ roles, OTP test mode, field-visit pages").
 
 | Who | How they get in | What they see |
 | --- | --- | --- |
-| Admin (`adminRole: ADMIN`) | The super admin adds their number in Team | Shops (dashboard, lists, shop pages and decisions), Support, More |
-| Super admin (`SUPER_ADMIN`) | Set on the backend | Everything an admin sees, plus Team and Test mode |
+| Admin, designation Field agent (`adminRole: ADMIN`, `designation: FIELD_AGENT`) | A super admin adds them in Team with their phone, email, name and the pincodes they cover | Only the businesses assigned to them (dashboard, lists, shop pages and decisions), More |
+| Super admin (`SUPER_ADMIN`, no designation, no pincodes; there can be several) | Another super admin, in Team (the first one is set on the backend) | Every business, who visits each and assigning them, Support, Team (members and coverage) and Test mode |
 | Anyone else (`NONE`) | Signs in like everywhere else | "This is for the Clozest team" and Sign out, nothing more |
 
 Shop owners use the partner app; customers use the customer app.
@@ -76,10 +76,11 @@ reviews walk the list against the code.
 | Sign in, code, recovery | `/signin`, `/signin/code`, `/signin/recover` | Everyone |
 | Email and name steps | `/welcome/email`, `/welcome/name` | Admins who haven't given them yet |
 | Dashboard: Kirana / Salon, six counts | `/?type=SALON` | Admins |
-| Shop list for a type and group, with search, 50 at a time ("Show more shops") | `/shops?type=KIRANA&group=FIRST_VISIT&q=` | Admins |
-| Shop page: what changed, photos, details, Navigate, Call owner, timeline, decisions | `/shops/:id` | Admins |
-| Support: a customer's strikes | `/support` | Admins |
-| Team | `/team` | Super admin |
+| Shop list for a type and group, with search, 50 at a time ("Show more shops"); All / Unassigned for waiting groups | `/shops?type=KIRANA&group=FIRST_VISIT&q=&who=UNASSIGNED` | Admins (a field agent: their own only) |
+| Shop page: what changed, photos, details, Navigate, Call owner, timeline, decisions; "Visit by" with Assign / Reassign | `/shops/:id` | Admins (Assign: super admin) |
+| Support: a customer's strikes | `/support` | Super admin |
+| Team: members (Edit, Move waiting visits, Remove) and Coverage (pincode → agents) | `/team`, `/team?view=coverage` | Super admin |
+| Add or edit a member: phone, email, name, role, designation, pincodes (chips) | `/team/new`, `/team/:id` | Super admin |
 | Test mode | `/test-mode` | Super admin |
 | More: profile, Sign out | `/more` | Admins |
 
@@ -240,6 +241,27 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### 0.6.0 — 2026-11-09
+
+- **Field agents and assignment.** Role (Admin or Super admin) and, for an admin, a designation: Field agent, the
+  only one so far. Every field agent covers one or more pincodes. Existing admins become field agents with no
+  pincodes (they see nothing until a super admin adds some). Several super admins are allowed.
+- **Team page.** A super admin adds a member with phone, email, name, role and, for a field agent, pincodes. There
+  is no code at adding: they confirm their phone and email at their next sign-in. Pincodes are typed one at a time
+  (Add or Enter) and become chips with ×; a pasted list adds them all, says which were already there or not valid,
+  and keeps at most 300. A super admin edits everything about any member, any time (a phone or email change signs
+  them out; editing your own signs you out here), removes anyone but themselves, and moves all of an agent's
+  waiting visits to another agent. A Coverage tab lists each pincode with its agents.
+- **Who visits each business.** A business that starts waiting for a visit goes to the field agent covering its
+  pincode with the fewest waiting visits (the longest on the team on a tie), never to someone who works in it;
+  otherwise it is Unassigned. Shop lists show "Visit by"; an All / Unassigned choice on waiting groups; the shop
+  page has Assign / Reassign for a super admin. Removing a pincode from an agent hands its waiting businesses on by
+  the same rule.
+- **A field agent** sees and decides only the businesses assigned to them (anything else is "not found"); their
+  tabs are Businesses and More. **Support** is now for super admins only.
+- Stale edits are refused ("Someone changed this member…" with Load the latest); a member removed meanwhile keeps
+  the form and says nothing was saved. Needs the backend's field-agents version (V30–V32).
 
 ### 0.5.2 — 2026-11-08
 

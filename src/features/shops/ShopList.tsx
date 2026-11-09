@@ -1,25 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useSearchParams } from 'react-router'
 import { useShopList } from '../../api/admin'
+import { useAdmin } from '../../app/guards'
+import { isSuperAdmin } from '../../lib/roles'
 import { explain, fieldError, isNetwork } from '../../api/errors'
 import type { AdminShop } from '../../api/types'
-import { Banner, Button, Card, EmptyState, ErrorState, Field, Loading, Page, Pill, Spinner } from '../../components/ui'
+import { Banner, Button, Card, Chip, EmptyState, ErrorState, Field, Loading, Page, Pill, Spinner } from '../../components/ui'
 import { GROUP_LABELS, isGroup, isShopType, sinceText, TYPE_LABELS } from '../../lib/labels'
 import { searchable } from '../../lib/rules'
 import { useDebounced } from '../../lib/useDebounced'
 import { useNow } from '../../lib/useNow'
 
-/** The shops of one type in one group, oldest first, 50 at a time, with a search box. */
+/**
+ * The shops of one type in one group, oldest first, 50 at a time, with a search box. A field agent sees only the
+ * businesses assigned to them; a super admin sees all, who visits each, and (for those waiting) can show only the
+ * unassigned ones (?who=UNASSIGNED).
+ */
 export function ShopList() {
   const [params, setParams] = useSearchParams()
+  const superAdmin = isSuperAdmin(useAdmin().adminRole)
   const type = params.get('type')
   const group = params.get('group')
+  const waitingGroup = group === 'FIRST_VISIT' || group === 'RECHECK'
+  const unassignedOnly = superAdmin && waitingGroup && params.get('who') === 'UNASSIGNED'
   const [text, setText] = useState(params.get('q') ?? '')
   // 1 or 2 letters aren't sent (the backend refuses them): the whole list stays, with a hint
   const typed = searchable(text)
   const q = useDebounced(typed.q, 300)
   const ok = isShopType(type) && isGroup(group)
-  const list = useShopList(ok ? type : 'KIRANA', ok ? group : 'FIRST_VISIT', q)
+  const list = useShopList(ok ? type : 'KIRANA', ok ? group : 'FIRST_VISIT', q, unassignedOnly ? 'UNASSIGNED' : 'ALL')
   const now = useNow(60_000)
   const listRef = useRef<HTMLUListElement | null>(null)
   const countRef = useRef<HTMLParagraphElement | null>(null)
@@ -28,7 +37,7 @@ export function ShopList() {
   const loaded = list.data?.pages.flat().length ?? 0
   // "You're offline" from a tap on Show more: only for this list as it was then (gone with a new search, group or
   // type, or once a page loads)
-  const listKey = `${type} ${group} ${q}`
+  const listKey = `${type} ${group} ${q} ${unassignedOnly}`
   const [offlineAt, setOfflineAt] = useState<{ key: string; loaded: number } | null>(null)
   // Leaving this list forgets the note (React's "adjust state while rendering"): coming back to it later, with its
   // pages still cached and the same count, must not bring an old "You're offline" back
@@ -58,8 +67,9 @@ export function ShopList() {
     if (!ok) return
     const next = new URLSearchParams({ type, group })
     if (q) next.set('q', q)
+    if (unassignedOnly) next.set('who', 'UNASSIGNED')
     if (next.toString() !== params.toString()) setParams(next, { replace: true })
-  }, [q, ok, type, group, params, setParams])
+  }, [q, ok, type, group, unassignedOnly, params, setParams])
 
   if (!ok) return <Navigate to="/" replace />
   const shops = list.data?.pages.flat() ?? []
@@ -83,6 +93,16 @@ export function ShopList() {
           onChange={(e) => setText(e.target.value)}
         />
       </form>
+      {superAdmin && waitingGroup && (
+        <div className="flex gap-2" role="group" aria-label="Who visits">
+          <Chip selected={!unassignedOnly} onClick={() => setParams(withWho(params, null), { replace: true })}>
+            All
+          </Chip>
+          <Chip selected={unassignedOnly} onClick={() => setParams(withWho(params, 'UNASSIGNED'), { replace: true })}>
+            Unassigned
+          </Chip>
+        </div>
+      )}
       {list.isFetching && !list.isPending && !list.isFetchingNextPage && (
         <div className="flex justify-center">
           <Spinner small label="Searching…" />
@@ -101,6 +121,10 @@ export function ShopList() {
           {shops.length === 0 ? (
             q ? (
               <EmptyState title="No business matches" body={`Nothing in this list matches "${q}".`} />
+            ) : unassignedOnly ? (
+              <EmptyState title="Nothing unassigned" body="Every waiting business here has a field agent." />
+            ) : !superAdmin ? (
+              <EmptyState title="Nothing here" body={`No ${TYPE_LABELS[type].toLowerCase()} business assigned to you is in "${GROUP_LABELS[group]}" right now.`} />
             ) : (
               <EmptyState title="Nothing here" body={`No ${TYPE_LABELS[type].toLowerCase()} business is in "${GROUP_LABELS[group]}" right now.`} />
             )
@@ -116,7 +140,7 @@ export function ShopList() {
               <ul ref={listRef} className="flex flex-col gap-2" aria-label="Businesses">
                 {shops.map((s, i) => (
                   <li key={s.id}>
-                    <ShopCard shop={s} now={now} index={i} />
+                    <ShopCard shop={s} now={now} index={i} showAgent={superAdmin} />
                   </li>
                 ))}
               </ul>
@@ -154,7 +178,15 @@ export function ShopList() {
   )
 }
 
-function ShopCard({ shop, now, index }: { shop: AdminShop; now: number; index: number }) {
+/** The address with `who` set (UNASSIGNED) or removed (null), keeping the rest. */
+function withWho(params: URLSearchParams, who: string | null): URLSearchParams {
+  const next = new URLSearchParams(params)
+  if (who) next.set('who', who)
+  else next.delete('who')
+  return next
+}
+
+function ShopCard({ shop, now, index, showAgent }: { shop: AdminShop; now: number; index: number; showAgent: boolean }) {
   return (
     <Link to={`/shops/${shop.id}`} data-index={index} className="block">
       <Card className="flex min-w-0 flex-col gap-1 hover:bg-raised">
@@ -169,6 +201,15 @@ function ShopCard({ shop, now, index }: { shop: AdminShop; now: number; index: n
         <p className="text-sm text-muted">
           {sinceText(shop.group, shop.statusSince, now)}
         </p>
+        {showAgent && shop.assignedTo !== undefined && (
+          <p className="min-w-0 text-sm [overflow-wrap:anywhere]">
+            {shop.assignedTo ? (
+              <span className="text-muted">Visit by {shop.assignedTo.name || 'a field agent'}</span>
+            ) : shop.status === 'PENDING_VISIT' ? (
+              <span className="text-warn">Unassigned: no field agent can take {shop.pincode}</span>
+            ) : null}
+          </p>
+        )}
       </Card>
     </Link>
   )

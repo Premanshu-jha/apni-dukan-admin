@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useAdmin } from '../../app/guards'
 import { Button, Card, Page, Pill } from '../../components/ui'
-import { ROLE_LABELS } from '../../lib/labels'
+import { DESIGNATION_LABELS, ROLE_LABELS } from '../../lib/labels'
 import { formatPhone } from '../../lib/phone'
 import { signOutHere } from '../auth/signOut'
 
@@ -15,7 +15,9 @@ export function More() {
         <p className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{me.name || 'No name yet'}</p>
         {me.phone && <p className="text-muted">+91 {formatPhone(me.phone)}</p>}
         <div>
-          <Pill tone={me.adminRole === 'SUPER_ADMIN' ? 'brand' : 'muted'}>{ROLE_LABELS[me.adminRole]}</Pill>
+          <Pill tone={me.adminRole === 'SUPER_ADMIN' ? 'brand' : 'muted'}>
+            {me.designation ? `${ROLE_LABELS[me.adminRole]} · ${DESIGNATION_LABELS[me.designation]}` : ROLE_LABELS[me.adminRole]}
+          </Pill>
         </div>
       </Card>
       <Button

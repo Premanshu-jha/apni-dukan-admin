@@ -4,8 +4,11 @@ import { ApiError } from './errors'
 import type {
   AdminMe,
   AdminShop,
+  Covered,
   Dashboard,
   DecisionIn,
+  MemberIn,
+  Moved,
   ShopDetail,
   ShopGroup,
   ShopType,
@@ -19,6 +22,9 @@ import type {
 import type { Decision } from '../lib/rules'
 
 const A = '/api/v1/admin'
+
+/** Which businesses a super admin's list shows: all, those nobody is assigned, or one agent's (their id). */
+export type ShopFilter = 'ALL' | 'UNASSIGNED' | (string & {})
 
 /** Called when a write is refused with 403 or 404: maybe this person's role changed. Set by the app. */
 let onRoleDoubt: () => void = () => {}
@@ -45,10 +51,15 @@ async function write<T>(method: string, path: string, body?: unknown): Promise<T
 export const adminApi = {
   me: () => api<AdminMe>('GET', `${A}/me`),
   dashboard: () => api<Dashboard>('GET', `${A}/dashboard`),
-  /** One page of a group's shops; `after` is the last shop of the page before (null: the first page). */
-  shops: (type: ShopType, group: ShopGroup, q: string, after: AdminShop | null, signal?: AbortSignal) => {
+  /**
+   * One page of a group's shops; `after` is the last shop of the page before (null: the first page). `who` (super
+   * admins): UNASSIGNED for those waiting with no agent, or an agent's id; a field agent always gets their own.
+   */
+  shops: (type: ShopType, group: ShopGroup, q: string, after: AdminShop | null, signal?: AbortSignal, who: ShopFilter = 'ALL') => {
     const params = new URLSearchParams({ type, group })
     if (q.trim()) params.set('q', q.trim())
+    if (who === 'UNASSIGNED') params.set('unassigned', 'true')
+    else if (who !== 'ALL') params.set('assignedTo', who)
     if (after) {
       // Exactly as received: the backend reads the instant back to the microsecond
       params.set('afterSince', after.statusSince)
@@ -68,13 +79,20 @@ export const adminApi = {
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
   addNote: (id: string, note: string) =>
     write<TimelineEntry>('POST', `${A}/shops/${encodeURIComponent(id)}/notes`, { note }),
+  /** Super admins: give a business waiting for a visit to this field agent. */
+  assign: (id: string, adminId: string) => write<void>('POST', `${A}/shops/${encodeURIComponent(id)}/assign`, { adminId }),
+  /** Super admins: every business waiting for one agent's visit goes to another (leave). */
+  moveAll: (fromAdminId: string, toAdminId: string) => write<Moved>('POST', `${A}/assignments/move`, { fromAdminId, toAdminId }),
 
   lookupStrikes: (phone: string) => write<StrikeLookup>('POST', `${A}/salon/strikes/lookup`, { phone }),
   removeStrike: (appointmentId: string, reason: string) =>
     write<void>('POST', `${A}/salon/strikes/${encodeURIComponent(appointmentId)}/remove`, { reason }),
 
   team: () => api<TeamMember[]>('GET', `${A}/team`),
-  addMember: (phone: string) => write<TeamMember>('POST', `${A}/team`, { phone }),
+  coverage: () => api<Covered[]>('GET', `${A}/team/coverage`),
+  addMember: (member: MemberIn) => write<TeamMember>('POST', `${A}/team`, member),
+  editMember: (userId: string, version: number, member: MemberIn) =>
+    write<TeamMember>('PUT', `${A}/team/${encodeURIComponent(userId)}`, { version, ...member }),
   removeMember: (userId: string) => write<void>('DELETE', `${A}/team/${encodeURIComponent(userId)}`),
 
   testMode: () => api<TestModeState>('GET', `${A}/test-mode`),
@@ -93,12 +111,16 @@ export const keys = {
   me: ['admin', 'me'] as const,
   dashboard: ['admin', 'dashboard'] as const,
   shops: ['admin', 'shops'] as const,
-  shopList: (type: ShopType, group: ShopGroup, q: string) => ['admin', 'shops', type, group, q.trim()] as const,
+  shopList: (type: ShopType, group: ShopGroup, q: string, who: ShopFilter = 'ALL') =>
+    ['admin', 'shops', type, group, q.trim(), who] as const,
   shop: (id: string) => ['admin', 'shop', id] as const,
+  /** Every shop page at once (an assignment or a Team change may change who visits any of them). */
+  shopPages: ['admin', 'shop'] as const,
   /** Outside ['admin', 'shop', id]: refreshing the shop page doesn't ask the earlier entries again. */
   timeline: (id: string, start: TimelineNext | null) =>
     ['admin', 'timeline', id, start?.afterAt ?? null, start?.afterSeq ?? null] as const,
   team: ['admin', 'team'] as const,
+  coverage: ['admin', 'team', 'coverage'] as const,
   testMode: ['admin', 'test-mode'] as const,
 }
 
@@ -119,11 +141,11 @@ export const SHOPS_PAGE = 50
  * and id (keyset paging), so a group with thousands of shops is never loaded at once. A new search, group or type
  * is a new key: it starts again from the first page.
  */
-export function useShopList(type: ShopType, group: ShopGroup, q: string) {
+export function useShopList(type: ShopType, group: ShopGroup, q: string, who: ShopFilter = 'ALL') {
   return useInfiniteQuery({
-    queryKey: keys.shopList(type, group, q),
+    queryKey: keys.shopList(type, group, q, who),
     initialPageParam: null as AdminShop | null,
-    queryFn: ({ pageParam, signal }) => adminApi.shops(type, group, q, pageParam, signal),
+    queryFn: ({ pageParam, signal }) => adminApi.shops(type, group, q, pageParam, signal, who),
     getNextPageParam: (last: AdminShop[]) => (last.length < SHOPS_PAGE ? undefined : last[last.length - 1]),
     // Keep the last answer on screen while a new search is on its way.
     placeholderData: keepPreviousData,
@@ -155,8 +177,13 @@ export function useEarlierTimeline(id: string, start: TimelineNext | null, enabl
   })
 }
 
-export function useTeam() {
-  return useQuery({ queryKey: keys.team, queryFn: adminApi.team })
+/** The team (super admins only), or nothing while `enabled` is false (a field agent never asks). */
+export function useTeam(enabled = true) {
+  return useQuery({ queryKey: keys.team, queryFn: adminApi.team, enabled })
+}
+
+export function useCoverage() {
+  return useQuery({ queryKey: keys.coverage, queryFn: adminApi.coverage })
 }
 
 export function useTestMode() {

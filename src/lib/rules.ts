@@ -12,8 +12,12 @@ export const HOURS_MAX = 8
 
 export type Decision = 'approve' | 'reject' | 'suspend' | 'reinstate'
 
-/** The decision buttons each status offers (Add note is always there). A sent-back draft waits for the owner. */
-export function decisionsFor(status: ShopStatus): Decision[] {
+/**
+ * The decision buttons each status offers (Add note is always there). A sent-back draft waits for the owner. A field
+ * agent only approves or sends back (suspending and reinstating are for super admins).
+ */
+export function decisionsFor(status: ShopStatus, superAdmin = true): Decision[] {
+  if (!superAdmin) return status === 'PENDING_VISIT' ? ['approve', 'reject'] : []
   switch (status) {
     case 'PENDING_VISIT':
       return ['approve', 'reject', 'suspend']
