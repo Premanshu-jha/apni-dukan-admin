@@ -77,6 +77,14 @@ export const adminApi = {
     ),
   decide: (id: string, decision: Decision, body: DecisionIn) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
+  /** Super admins: live salons with a new registration document to check, oldest change first (at most 100). */
+  documentsToCheck: () => api<AdminShop[]>('GET', `${A}/shops/documents-to-check`),
+  /** The document was checked: customers see "Registered". */
+  checkDocument: (id: string, version: number) =>
+    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/check`, { version }),
+  /** Take a wrong or expired document off the salon, with the reason the owner is told. */
+  removeDocument: (id: string, version: number, reason: string) =>
+    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/remove`, { version, reason }),
   addNote: (id: string, note: string) =>
     write<TimelineEntry>('POST', `${A}/shops/${encodeURIComponent(id)}/notes`, { note }),
   /** Super admins: give a business waiting for a visit to this field agent. */
@@ -122,6 +130,20 @@ export const keys = {
   team: ['admin', 'team'] as const,
   coverage: ['admin', 'team', 'coverage'] as const,
   testMode: ['admin', 'test-mode'] as const,
+  documentsToCheck: ['admin', 'shops', 'documents-to-check'] as const,
+}
+
+/**
+ * How often the dashboard, the document list and the shop lists are read again while the tab is in front (and at
+ * once when it comes back), so a salon or document that arrives while one sits open shows up without a reload.
+ */
+export const LIST_REFRESH_MS = 30_000
+
+/** Pages of a shop list kept fresh on the timer: beyond this, re-reading every loaded page each time costs too much. */
+const REFRESHED_PAGES = 2
+
+export function useDocumentsToCheck(enabled: boolean) {
+  return useQuery({ queryKey: keys.documentsToCheck, queryFn: adminApi.documentsToCheck, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
 }
 
 /** Who is signed in and whether test mode is on. Re-read every minute and on focus, so the banner stays true. */
@@ -130,7 +152,7 @@ export function useMe() {
 }
 
 export function useDashboard() {
-  return useQuery({ queryKey: keys.dashboard, queryFn: adminApi.dashboard, staleTime: 10_000 })
+  return useQuery({ queryKey: keys.dashboard, queryFn: adminApi.dashboard, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
 }
 
 /** Shops per page from the backend (ShopReviewStore.PAGE); a shorter page is the last one. */
@@ -150,10 +172,16 @@ export function useShopList(type: ShopType, group: ShopGroup, q: string, who: Sh
     // Keep the last answer on screen while a new search is on its way.
     placeholderData: keepPreviousData,
     staleTime: 10_000,
+    // Every loaded page is read again each time, so only while one or two are loaded (a long scroll still refreshes
+    // when the tab comes back)
+    refetchInterval: (query) => ((query.state.data?.pages.length ?? 0) <= REFRESHED_PAGES ? LIST_REFRESH_MS : false),
   })
 }
 
-/** A shop's page. Its photo links last a few minutes, so it is re-read every 4 minutes while open. */
+/**
+ * A shop's page. Its photo links last a few minutes, so it is re-read every 4 minutes while open (not every 30
+ * seconds like the lists: each read signs new links, so the photos would load again and a playing video restart).
+ */
 export function useShopDetail(id: string) {
   return useQuery({ queryKey: keys.shop(id), queryFn: () => adminApi.shop(id), refetchInterval: 4 * 60_000 })
 }

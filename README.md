@@ -242,6 +242,25 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.7.0 — 2026-11-10
+
+Needs the backend with V34–V36.
+
+- **A salon's page** shows its registration document (which one, and Open), its opening hours (closed days named),
+  its services with times and prices, and its rating so far. A new document after approval shows in What changed
+  ("The owner sent a new Trade licence", or the kind it was and is now). The document is optional for salons: "None
+  added" when there is none (customers see "Unregistered" on its card).
+- **Registration documents.** The document section says whether it was checked (customers see "Registered" only
+  then). **Mark as checked**, or **Remove** a wrong or expired one with the reason the owner is told. Approving a salon
+  after its visit checks the document there, so **remove a wrong document before approving** (the salon itself can
+  still be approved: the document is optional). A live salon that adds or changes one stays live; super admins see
+  "Registration documents to check" under the Salon tab of Businesses.
+- **Lists refresh themselves.** The dashboard counts, "Registration documents to check" and an open shop list are
+  read again every 30 seconds while the tab is in front (and at once when it comes back), so a business registered or
+  a document uploaded meanwhile shows up without a reload. A shop list refreshes on the timer while one or two pages
+  are loaded; after a long "Show more" scroll it refreshes when the tab comes back. A shop's page stays at every 4
+  minutes: each read signs new photo links, so a faster one would reload the photos and restart a playing video.
+
 ### 0.6.0 — 2026-11-09
 
 - **Field agents and assignment.** Role (Admin or Super admin) and, for an admin, a designation: Field agent, the

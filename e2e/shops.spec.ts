@@ -322,3 +322,21 @@ test('closed shops: their own group on the dashboard and list, "Closed by the ow
   }
   await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible()
 })
+
+test('the dashboard and an open list pick up a new business within 30 seconds, without a reload', async ({ page, context, api }) => {
+  await page.clock.install()
+  api.addShop({ name: 'Gupta General Store' })
+  await atDashboard(page, context, api)
+  const counts = page.getByRole('list', { name: 'Kirana businesses by group' })
+  await expect(counts.getByRole('link', { name: 'Waiting for first visit: 1' })).toBeVisible()
+  api.addShop({ name: 'Sharma Kirana' })   // registered meanwhile
+  await page.clock.runFor(31_000)
+  await expect(counts.getByRole('link', { name: 'Waiting for first visit: 2' })).toBeVisible()
+
+  await counts.getByRole('link', { name: 'Waiting for first visit: 2' }).click()
+  const cards = page.getByRole('list', { name: 'Businesses' }).getByRole('listitem')
+  await expect(cards).toHaveCount(2)
+  api.addShop({ name: 'Verma Stores' })
+  await page.clock.runFor(31_000)
+  await expect(cards).toHaveCount(3)
+})

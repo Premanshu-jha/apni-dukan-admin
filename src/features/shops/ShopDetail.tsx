@@ -6,7 +6,16 @@ import { useAdmin } from '../../app/guards'
 import { isSuperAdmin } from '../../lib/roles'
 import { AssignSheet } from './AssignSheet'
 import { ADMIN_MESSAGES, explain, isApiError, isNetwork, wrongStatusText } from '../../api/errors'
-import type { AdminShop, Change, ShopDetail as Detail, ShopStatus, TimelineEntry, TimelineNext } from '../../api/types'
+import type {
+  AdminShop,
+  Change,
+  RegistrationDoc,
+  SalonFacts,
+  ShopDetail as Detail,
+  ShopStatus,
+  TimelineEntry,
+  TimelineNext,
+} from '../../api/types'
 import { Photo } from '../../components/Photo'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
 import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
@@ -14,6 +23,7 @@ import { directionsUrl, distanceLabel, telUrl } from '../../lib/links'
 import { formatPhone } from '../../lib/phone'
 import { DECISION_LABELS, decisionsFor, type Decision } from '../../lib/rules'
 import { dateIst, dateTimeIst } from '../../lib/time'
+import { clock12, rupees } from '../../lib/salon'
 import { type Conflict, DecisionSheet, type Draft, EMPTY_DRAFT, NoteSheet } from './DecisionSheet'
 
 /** The status a decision leads to: after a lost answer, seeing it on a re-read means the decision went through. */
@@ -218,6 +228,20 @@ export function ShopDetail() {
 
       {shop.type === 'SALON' && <SalonVideo url={data.videoUrl ?? null} />}
 
+      {shop.type === 'SALON' && (
+        <RegistrationDocument
+          doc={data.registrationDoc ?? null}
+          shopId={shop.id}
+          version={shop.version}
+          canAct={!stale && shop.status !== 'CLOSED'}
+          onDone={(text) => {
+            setNotice(text)
+            void qc.invalidateQueries({ queryKey: keys.shop(shop.id) })
+            void qc.invalidateQueries({ queryKey: keys.documentsToCheck })
+          }}
+        />
+      )}
+
       <div className="grid grid-cols-2 gap-2">
         <a
           href={directionsUrl(shop.latitude, shop.longitude)}
@@ -251,11 +275,13 @@ export function ShopDetail() {
             <Row label="GSTIN">{shop.gstin || '—'}</Row>
             <Row label="Udyam">{shop.udyamNumber || '—'}</Row>
             <Row label="Registered">{dateIst(shop.createdAt)}</Row>
-            {data.salon && <Row label="Barbers">{String(data.salon.barbers)}</Row>}
-            {data.salon && <Row label="Services">{String(data.salon.services)}</Row>}
+            {data.salon && data.salon.serviceList === undefined && <Row label="Barbers">{String(data.salon.barbers)}</Row>}
+            {data.salon && data.salon.serviceList === undefined && <Row label="Services">{String(data.salon.services)}</Row>}
           </dl>
         </Card>
       </section>
+
+      {data.salon && <SalonSetup facts={data.salon} />}
 
       <Timeline id={id} first={data.timeline} next={data.timelineNext} />
 
@@ -485,12 +511,183 @@ function SalonVideo({ url }: { url: string | null }) {
   )
 }
 
+/** The salon's registration document (any one of three), to check against the shop on the visit. */
+/**
+ * The salon's optional registration document: open it, mark it as checked (customers then see "Registered"), or take
+ * a wrong or expired one off with the reason the owner is told. Approving a salon after its visit checks it too.
+ */
+function RegistrationDocument({
+  doc,
+  shopId,
+  version,
+  canAct,
+  onDone,
+}: {
+  doc: RegistrationDoc | null
+  shopId: string
+  version: number
+  canAct: boolean
+  onDone: (text: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [removing, setRemoving] = useState(false)
+  const [reason, setReason] = useState('')
+  async function run(call: () => Promise<unknown>, text: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      await call()
+      setRemoving(false)
+      setReason('')
+      onDone(text)
+    } catch (e) {
+      setError(explain(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section aria-labelledby="reg-doc" className="flex flex-col gap-2">
+      <h2 id="reg-doc" className="font-semibold">Registration document</h2>
+      {!doc ? (
+        <p className="rounded-xl border border-dashed border-line p-3 text-sm text-muted">None added</p>
+      ) : (
+        <Card className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0 text-sm [overflow-wrap:anywhere]">{doc.label}</span>
+            {doc.url ? (
+              <a href={doc.url} target="_blank" rel="noopener noreferrer" className="shrink-0 font-semibold text-link underline">
+                Open
+              </a>
+            ) : (
+              <span className="shrink-0 text-sm text-muted">File gone</span>
+            )}
+          </div>
+          <p className="text-sm text-muted">
+            {doc.checkedAt
+              ? `Checked ${dateTimeIst(doc.checkedAt)}: customers see "Registered".`
+              : 'Not checked yet: customers see "Unregistered" until it is.'}
+          </p>
+          {canAct && !removing && (
+            <div className="grid grid-cols-2 gap-2">
+              {!doc.checkedAt && (
+                <Button busy={busy} onClick={() => run(() => adminApi.checkDocument(shopId, version), 'Document marked as checked.')}>
+                  Mark as checked
+                </Button>
+              )}
+              <Button variant="secondary" disabled={busy} onClick={() => setRemoving(true)}>
+                Remove
+              </Button>
+            </div>
+          )}
+          {removing && (
+            <div className="flex flex-col gap-2">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-muted">Why (the owner is told)</span>
+                <textarea
+                  value={reason}
+                  maxLength={200}
+                  rows={2}
+                  onChange={(e) => setReason(e.target.value)}
+                  className="rounded-xl border border-line bg-surface p-3 text-base text-ink focus:border-brand focus:outline-none"
+                />
+              </label>
+              <Button
+                variant="danger"
+                busy={busy}
+                disabled={reason.trim().length < 2}
+                onClick={() => run(() => adminApi.removeDocument(shopId, version, reason.trim()), 'Document removed. The owner was told why.')}
+              >
+                Remove the document
+              </Button>
+              <Button variant="secondary" disabled={busy} onClick={() => setRemoving(false)}>
+                Keep it
+              </Button>
+            </div>
+          )}
+          {error && <Banner tone="bad">{error}</Banner>}
+        </Card>
+      )}
+    </section>
+  )
+}
+
+/** What the salon offers, when it is open and what customers think: checked on the visit. */
+function SalonSetup({ facts }: { facts: SalonFacts }) {
+  const hours = facts.hours ?? []
+  const services = facts.serviceList ?? []
+  return (
+    <section aria-labelledby="salon-setup" className="flex flex-col gap-2">
+      <h2 id="salon-setup" className="font-semibold">Salon</h2>
+      <Card className="flex flex-col gap-3 text-sm">
+        <p>
+          {facts.barbers} barber{facts.barbers === 1 ? '' : 's'} · {facts.services} service{facts.services === 1 ? '' : 's'}
+          {facts.ratings !== undefined &&
+            ` · ${facts.ratings ? `${facts.ratingAverage?.toFixed(1) ?? '–'} ★ from ${facts.ratings} rating${facts.ratings === 1 ? '' : 's'}` : 'no ratings yet'}`}
+        </p>
+        {facts.hours !== undefined && (
+          <div>
+            <p className="font-medium">Opening hours</p>
+            {hours.length === 0 ? (
+              <p className="text-muted">Not set</p>
+            ) : (
+              <dl className="grid grid-cols-[3rem_1fr] gap-y-0.5">
+                {[1, 2, 3, 4, 5, 6, 7].map((d) => {
+                  const h = hours.find((x) => x.weekday === d)
+                  return (
+                    <div key={d} className="contents">
+                      <dt className="text-muted">{WEEKDAY[d - 1]}</dt>
+                      <dd>{h ? `${clock12(h.open)} – ${clock12(h.close)}` : 'Closed'}</dd>
+                    </div>
+                  )
+                })}
+              </dl>
+            )}
+          </div>
+        )}
+        {services.length > 0 && (
+          <div>
+            <p className="font-medium">Services</p>
+            <ul className="flex flex-col gap-0.5">
+              {services.map((s) => (
+                <li key={s.name} className="flex justify-between gap-3">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">
+                    {s.name} <span className="text-muted">· {s.durationMinutes} min</span>
+                  </span>
+                  <span className="shrink-0">{rupees(s.pricePaise, s.priceIsFrom)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
+    </section>
+  )
+}
+
+const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
 function ChangeRow({ change, detail, shop }: { change: Change; detail: Detail; shop: AdminShop }) {
   if (change.field === 'shopVideo') {
     return (
       <div className="text-sm">
         <p className="font-medium">{change.label}</p>
         <p>The owner sent a new video. Watch it below.</p>
+      </div>
+    )
+  }
+  if (change.field === 'registrationDoc') {
+    return (
+      <div className="text-sm">
+        <p className="font-medium">{change.label}</p>
+        <p>
+          {change.before === null
+            ? `The owner added a ${change.after ?? 'document'}.`
+            : change.after === change.before
+              ? `The owner sent a new ${change.after}. Open it below.`
+              : `Was ${change.before}, now ${change.after ?? 'none'}. Open it below.`}
+        </p>
       </div>
     )
   }
