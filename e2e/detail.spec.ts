@@ -56,12 +56,17 @@ test('a first visit: photos enlarge, Navigate and Call owner links, details, no 
   await expect(nav).toHaveAttribute('target', '_blank')
   await expect(page.getByRole('link', { name: 'Call owner' })).toHaveAttribute('href', 'tel:+919811122233')
   await expect(page.getByText('+91 98111 22233')).toBeVisible()
-  // Salon counts
-  const details = page.getByRole('region', { name: 'Details' })
-  await expect(details).toContainText('Barbers')
-  await expect(details).toContainText('2')
-  await expect(details).toContainText('Services')
-  await expect(details).toContainText('5')
+  // The salon: counts, hours, services with prices, ratings; and its registration document
+  const salon = page.getByRole('region', { name: 'Salon', exact: true })
+  await expect(salon).toContainText('2 barbers · 5 services · 4.4 ★ from 7 ratings')
+  await expect(salon).toContainText('Sun')
+  await expect(salon).toContainText('Closed')
+  await expect(salon).toContainText('10:00 AM – 9:00 PM')
+  await expect(salon).toContainText('Hair colour · 60 min')
+  await expect(salon).toContainText('from ₹800')
+  const doc = page.getByRole('region', { name: 'Registration document' })
+  await expect(doc).toContainText('Trade licence')
+  await expect(doc.getByRole('link', { name: 'Open' })).toHaveAttribute('target', '_blank')
   await page.getByRole('button', { name: 'Front photo, tap to enlarge' }).click()
   const big = page.getByRole('dialog', { name: 'Front photo' })
   await expect(big.getByRole('img', { name: 'Front photo, large' })).toBeVisible()
@@ -443,7 +448,13 @@ test('a hand-over in the timeline names the new owner', async ({ page, context, 
 test('a salon’s page plays the owner’s salon video for the field team; a new one is named in what changed', async ({ page, context, api }) => {
   const salon = api.addShop(
     { name: 'Shine Unisex Salon', type: 'SALON' },
-    { approvedBefore: true, changes: [{ field: 'shopVideo', label: 'Salon video', before: null, after: null }] },
+    {
+      approvedBefore: true,
+      changes: [
+        { field: 'shopVideo', label: 'Salon video', before: null, after: null },
+        { field: 'registrationDoc', label: 'Registration document', before: 'Trade licence', after: 'Trade licence' },
+      ],
+    },
   )
   const noVideo = api.addShop({ name: 'Royal Cuts', type: 'SALON' }, { videoUrl: null })
   const kirana = api.addShop({ name: 'Gupta General Store', type: 'KIRANA' })
@@ -456,6 +467,8 @@ test('a salon’s page plays the owner’s salon video for the field team; a new
   await expect(video).toHaveAttribute('playsinline', '')
   await expect(video).toHaveAttribute('preload', 'metadata')
   await expect(page.getByRole('region', { name: 'What changed' })).toContainText('The owner sent a new video. Watch it below.')
+  // The same kind of document, a new file: said so, not "Trade licence → Trade licence"
+  await expect(page.getByRole('region', { name: 'What changed' })).toContainText('The owner sent a new Trade licence. Open it below.')
 
   await page.goto(`/shops/${noVideo.id}`)
   await expect(page.getByRole('region', { name: 'Salon video' })).toContainText('No video yet')
@@ -489,4 +502,37 @@ test('a salon video that can’t play here offers to open it on its own', async 
   await expect(open).toHaveAttribute('href', new RegExp(`^${PHOTOS}/broken\\.mp4\\?sig=`))
   await expect(open).toHaveAttribute('target', '_blank')
   await expect(open).toHaveAttribute('rel', /noopener/)
+})
+
+test('a live salon’s new registration document: listed to check, marked as checked, or removed with a reason', async ({ page, context, api }) => {
+  const salon = api.addShop({ name: 'Shine Unisex Salon', type: 'SALON', status: 'APPROVED' }, {
+    registrationDoc: { type: 'UDYAM', label: 'Udyam certificate', url: `${PHOTOS}/udyam.pdf`, checkedAt: null },
+  })
+  const version = salon.version
+  await page.clock.install()
+  await signedIn(context, api, 'SUPER_ADMIN')
+  await page.goto('/?type=SALON')
+  const list = page.getByRole('region', { name: /Registration documents to check: 1/ })
+  await expect(list.getByRole('link', { name: /Shine Unisex Salon/ })).toBeVisible()
+  // A document uploaded while the dashboard is open shows up on the 30-second refresh
+  api.addShop({ name: 'Style Studio', type: 'SALON', status: 'APPROVED' }, {
+    registrationDoc: { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/licence.pdf`, checkedAt: null },
+  })
+  await page.clock.runFor(31_000)
+  await expect(page.getByRole('region', { name: /Registration documents to check: 2/ })).toBeVisible()
+  await page.getByRole('link', { name: /Shine Unisex Salon/ }).click()
+
+  const doc = page.getByRole('region', { name: 'Registration document' })
+  await expect(doc).toContainText('Not checked yet: customers see "Unregistered" until it is.')
+  await doc.getByRole('button', { name: 'Mark as checked' }).click()
+  await expect(page.getByText('Document marked as checked.')).toBeVisible()
+  await expect(doc).toContainText('customers see "Registered"')
+  expect(api.calls.find((c) => c.path === `/api/v1/admin/shops/${salon.id as string}/registration-document/check`)!.body).toMatchObject({ version })
+
+  await doc.getByRole('button', { name: 'Remove' }).click()
+  await expect(doc.getByRole('button', { name: 'Remove the document' })).toBeDisabled()   // a reason first
+  await doc.getByLabel('Why (the owner is told)').fill('The certificate is for another shop.')
+  await doc.getByRole('button', { name: 'Remove the document' }).click()
+  await expect(page.getByText('Document removed. The owner was told why.')).toBeVisible()
+  await expect(doc).toContainText('None added')
 })

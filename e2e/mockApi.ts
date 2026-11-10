@@ -42,7 +42,10 @@ export interface Call {
 export interface ShopExtra {
   approvedBefore: boolean
   statusSince: string
-  salon: { barbers: number; services: number } | null
+  /** SalonFacts (the field team's facts about a salon); null for a kirana. */
+  salon: Json | null
+  /** The salon's registration document, or null. */
+  registrationDoc: Json | null
   changes: Json[]
   pinMovedMetres: number | null
   previousOwnerPhotoUrl: string | null
@@ -264,7 +267,20 @@ export class MockApi {
     this.extra.set(shop.id as string, {
       approvedBefore: false,
       statusSince: ago(3 * 24 * 60),
-      salon: shop.type === 'SALON' ? { barbers: 2, services: 5 } : null,
+      salon: shop.type === 'SALON' ? {
+        barbers: 2,
+        services: 5,
+        serviceList: [
+          { name: 'Haircut', durationMinutes: 30, pricePaise: 15000, priceIsFrom: false, returnAfterDays: 21 },
+          { name: 'Hair colour', durationMinutes: 60, pricePaise: 80000, priceIsFrom: true, returnAfterDays: 30 },
+        ],
+        hours: [1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, open: '10:00', close: '21:00' })),
+        ratings: 7,
+        ratingAverage: 4.4,
+      } : null,
+      registrationDoc: shop.type === 'SALON'
+        ? { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/doc-${shop.id as string}.pdf`, checkedAt: shop.status === 'APPROVED' ? ago(60 * 24) : null }
+        : null,
       changes: [],
       pinMovedMetres: null,
       previousOwnerPhotoUrl: null,
@@ -635,6 +651,33 @@ export class MockApi {
       return ok(200, { moved, stayed })
     }
 
+    if (p === '/admin/shops/documents-to-check' && method === 'GET') {
+      // ShopAdminService.documentsToCheck: super admins; live salons with a document not checked yet
+      if (!isSuper) return superOnly()
+      return ok(200, this.shops
+        .filter((s) => s.type === 'SALON' && s.status === 'APPROVED')
+        .filter((s) => { const d = this.extra.get(s.id as string)!.registrationDoc; return d !== null && !d.checkedAt })
+        .map((s) => this.view(s)))
+    }
+    const docPath = p.match(/^\/admin\/shops\/([^/]+)\/registration-document\/(check|remove)$/)
+    if (docPath && method === 'POST') {
+      const shop = this.shops.find((s) => s.id === docPath[1])
+      if (!shop || !this.sees(shop)) return fail(404, 'NOT_FOUND', 'No such shop.')
+      if (this.memberOf.has(shop.id as string)) return fail(403, 'OWN_SHOP', "You can't decide on a shop you belong to. Ask another admin.")
+      if (shop.status === 'CLOSED') return fail(409, 'WRONG_STATUS', `A shop that is CLOSED can't be changed. Someone may have decided already; reload.`, { status: 'CLOSED' })
+      if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop changed after you loaded it. Reload and check the new details first.')
+      const x = this.extra.get(shop.id as string)!
+      if (!x.registrationDoc) return fail(409, 'NO_DOCUMENT', 'This salon has no registration document.')
+      if (docPath[2] === 'remove') {
+        const problem = textProblem(body.reason, 2, 200)
+        if (problem) return invalid({ reason: problem })
+        x.registrationDoc = null
+      } else {
+        x.registrationDoc = { ...x.registrationDoc, checkedAt: new Date().toISOString() }
+      }
+      shop.version = (shop.version as number) + 1
+      return ok(200, this.view(shop))
+    }
     const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|notes))?$/)
     if (shopPath) {
       const action = shopPath[2]
@@ -656,6 +699,7 @@ export class MockApi {
           previousShopPhotoUrl: x.previousShopPhotoUrl,
           // Signed again on each read, as the backend does (a new query each time)
           videoUrl: x.videoUrl ? `${x.videoUrl}?sig=${++this.videoSigs}` : null,
+          registrationDoc: x.registrationDoc,
           timeline: first.items,
           timelineNext: first.next,
         })
