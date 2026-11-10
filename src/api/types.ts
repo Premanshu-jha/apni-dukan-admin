@@ -109,6 +109,7 @@ export type ChangeField =
   | 'ownerPhoto'
   | 'shopPhoto'
   | 'shopVideo'
+  | 'registrationDoc'
 
 export interface Change {
   field: ChangeField
@@ -152,10 +153,54 @@ export interface TimelineEntry {
   checklist: ChecklistItem[]
 }
 
+/** A salon's service as the field team checks it (prices in paise). */
+export interface SalonServiceFact {
+  name: string
+  durationMinutes: number
+  pricePaise: number
+  priceIsFrom: boolean
+  /** Days after a visit the customer is reminded to come back; 0: never. */
+  returnAfterDays: number
+}
+
+/** An open day: weekday 1 = Monday … 7 = Sunday, "HH:mm" ("24:00" = midnight). */
+export interface OpenDay {
+  weekday: number
+  open: string
+  close: string
+}
+
+/** A salon's size and setup. Older backends send only the two counts. */
+export interface SalonFacts {
+  barbers: number
+  services: number
+  serviceList?: SalonServiceFact[]
+  /** Open days, Monday first; a weekday left out is closed. Empty until set. */
+  hours?: OpenDay[]
+  ratings?: number
+  /** To one decimal; null with no ratings. */
+  ratingAverage?: number | null
+}
+
+export type RegistrationDocType = 'SHOPS_ESTABLISHMENT' | 'TRADE_LICENCE' | 'UDYAM'
+
+/** A salon's registration document: for the field team only. */
+export interface RegistrationDoc {
+  type: RegistrationDocType
+  /** e.g. "Trade licence" */
+  label: string
+  /** A signed link to the photo or PDF (valid at least 15 more minutes); null if the file is gone. */
+  url: string | null
+  /** When the field team checked this document (customers then see "Registered"); null: not yet. */
+  checkedAt?: string | null
+}
+
 /** GET /admin/shops/{id} */
 export interface ShopDetail {
   shop: AdminShop
-  salon: { barbers: number; services: number } | null
+  salon: SalonFacts | null
+  /** A salon's registration document; null if none (kiranas, salons registered before it was asked for). */
+  registrationDoc?: RegistrationDoc | null
   changes: Change[]
   pinMovedMetres: number | null
   previousOwnerPhotoUrl: string | null
