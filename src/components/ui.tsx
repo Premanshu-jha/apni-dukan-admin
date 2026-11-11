@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router'
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost'
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-brand text-brand-ink font-semibold hover:brightness-110',
+  primary: 'bg-brand bg-linear-to-br from-brand to-brand-deep text-brand-ink font-semibold shadow-lg shadow-brand/25 hover:brightness-110',
   secondary: 'bg-raised text-ink border border-line hover:bg-line',
   danger: 'bg-bad/15 text-bad border border-bad/40 hover:bg-bad/25',
   ghost: 'text-ink hover:bg-raised',
@@ -151,7 +151,7 @@ export function Page({
               ←
             </button>
           )}
-          {title && <h1 className={`min-w-0 flex-1 py-2 text-lg font-semibold [overflow-wrap:anywhere] ${back ? '' : 'px-2'}`}>{title}</h1>}
+          {title && <h1 className={`min-w-0 flex-1 py-2 font-display text-lg font-semibold [overflow-wrap:anywhere] ${back ? '' : 'px-2'}`}>{title}</h1>}
         </header>
       )}
       <main className="flex min-w-0 flex-1 flex-col gap-4 px-4 py-4">{children}</main>
@@ -220,7 +220,7 @@ export function Sheet({
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-lg rounded-t-3xl border-t border-line bg-surface p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
       >
-        <h2 className="mb-3 min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{title}</h2>
+        <h2 className="mb-3 min-w-0 font-display text-lg font-semibold [overflow-wrap:anywhere]">{title}</h2>
         {children}
       </div>
     </div>
