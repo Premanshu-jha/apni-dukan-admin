@@ -11,6 +11,8 @@ import { UpdatePrompt } from './components/UpdatePrompt'
 import { forgetThisPerson } from './features/auth/signOut'
 import { registerWorker } from './lib/swUpdate'
 import { followOtherTabs, useSession } from './store/session'
+import '@fontsource/poppins/600.css'
+import '@fontsource/poppins/700.css'
 import './index.css'
 
 /**
