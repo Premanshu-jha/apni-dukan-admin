@@ -4,7 +4,7 @@
 // button switches over (never in the middle of a decision).
 
 // Change the name when offline.html, offline.css or the icon change, so a new version stores them again
-const OFFLINE_CACHE = 'offline-v1'
+const OFFLINE_CACHE = 'offline-v2'
 const OFFLINE_PAGE = '/offline.html'
 const OFFLINE_FILES = [OFFLINE_PAGE, '/offline.css', '/icon.svg']
 
