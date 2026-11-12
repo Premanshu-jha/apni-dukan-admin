@@ -26,7 +26,7 @@ export function AssignSheet({
   const [to, setTo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
-  const agents = (team.data ?? []).filter((m) => m.adminRole === 'ADMIN' && m.userId !== shop.assignedTo?.id)
+  const agents = (team.data ?? []).filter((m) => m.designation === 'FIELD_AGENT' && m.userId !== shop.assignedTo?.id)
   const covering = agents.filter((a) => a.pincodes.includes(shop.pincode))
   const others = agents.filter((a) => !a.pincodes.includes(shop.pincode))
   const label = (a: TeamMember) => a.name || `+91 ${formatPhone(a.phone)}`

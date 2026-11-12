@@ -3,8 +3,11 @@
 // Instants are ISO strings in UTC; phone numbers are 10 digits without +91.
 
 export type AdminRole = 'NONE' | 'ADMIN' | 'SUPER_ADMIN'
-/** An ADMIN's job title (a SUPER_ADMIN has none). FIELD_AGENT: visits only the businesses assigned to them. */
-export type Designation = 'FIELD_AGENT'
+/**
+ * An ADMIN's job title (a SUPER_ADMIN has none). FIELD_AGENT: visits only the businesses assigned to them. SUPPORT:
+ * answers only the support tickets given to them (no businesses, no pincodes).
+ */
+export type Designation = 'FIELD_AGENT' | 'SUPPORT'
 
 export interface User {
   id: string
@@ -297,6 +300,8 @@ export interface TeamMember {
   pincodes: string[]
   /** Businesses waiting for their visit. */
   pendingVisits: number
+  /** Support tickets given to them and not resolved yet (missing from an older backend: 0). */
+  openTickets: number
   /** When they became an admin. */
   since: string
   /** Send it back with an edit (409 MEMBER_CHANGED if someone changed them since). */
@@ -350,4 +355,90 @@ export interface TestModeState {
   phones: TestPhone[]
   /** Missing from a backend older than the test email list. */
   emails?: TestEmail[]
+}
+
+// ---------- support tickets ----------
+
+/** OPEN: waiting on us. WAITING: we replied, waiting on them. RESOLVED: answered (their reply opens it again). */
+export type TicketStatus = 'OPEN' | 'WAITING' | 'RESOLVED'
+export type TicketSource = 'EMAIL' | 'CUSTOMER' | 'PARTNER'
+/** The lists: ACTIVE = open or waiting; UNASSIGNED is for super admins. */
+export type TicketView = 'ACTIVE' | 'OPEN' | 'WAITING' | 'RESOLVED' | 'UNASSIGNED'
+
+/** GET /admin/tickets: one row. */
+export interface TicketSummary {
+  id: string
+  /** CLZ-1042 */
+  number: string
+  subject: string
+  status: TicketStatus
+  source: TicketSource
+  /** The account's name, an unknown sender's name or address, or "Deleted account". */
+  requester: string
+  /** null = Unassigned */
+  assigneeId: string | null
+  assigneeName: string | null
+  createdAt: string
+  lastMessageAt: string
+}
+
+export interface TicketMessage {
+  seq: number
+  /** IN: from the person. OUT: our reply. */
+  direction: 'IN' | 'OUT'
+  author: string
+  body: string
+  /** Files they attached: kept only in the support Gmail inbox. */
+  attachments: number
+  /** False for an email whose sender we couldn't prove (it may not be from them). */
+  senderVerified: boolean
+  at: string
+}
+
+export interface TicketEvent {
+  event: string
+  /** null = the system */
+  actor: string | null
+  detail: string | null
+  at: string
+}
+
+/** One module's facts about the person (Account, Business, Latest bookings). */
+export interface ProfileSection {
+  order: number
+  title: string
+  lines: string[]
+}
+
+/** GET /admin/tickets/{id} */
+export interface TicketDetail {
+  ticket: TicketSummary
+  requesterId: string | null
+  /** Where replies go; null once they deleted their account. */
+  requesterEmail: string | null
+  messages: TicketMessage[]
+  events: TicketEvent[]
+  /** Empty for an email from an unknown address. */
+  profile: ProfileSection[]
+  earlierTickets: number
+  emailsWaiting: number
+  emailsFailed: number
+  /** Send it back with a reply (409 NEW_MESSAGE if they wrote after it). */
+  lastIncomingSeq: number
+  /** Send it back with a reassignment (409 TICKET_CHANGED). */
+  version: number
+  /** False when the first email's sender couldn't be proven: confirm who it is before acting on it. */
+  senderVerified: boolean
+}
+
+/** GET /admin/tickets/counts: for the menu badge. */
+export interface TicketCounts {
+  mineOpen: number
+  unassigned: number
+}
+
+/** GET /admin/tickets/stats (super admins) */
+export interface TicketStats {
+  people: Array<{ userId: string; name: string; support: boolean; open: number; waiting: number; resolved: number }>
+  unassigned: number
 }

@@ -1,3 +1,4 @@
+import { forgetTicketDrafts } from '../tickets/labels'
 import type { QueryClient } from '@tanstack/react-query'
 import { authApi } from '../../api/auth'
 import { useSession } from '../../store/session'
@@ -33,6 +34,7 @@ export function signOutHere(qc: QueryClient) {
  */
 export function forgetThisPerson(qc: QueryClient) {
   forgetReturn()
+  forgetTicketDrafts()
   void qc.cancelQueries()
   qc.clear()
 }

@@ -227,6 +227,58 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 | 194 | Pincodes added where a waiting business still can't be placed (the only agent works there) | Stays Unassigned; no log row is written | — | FieldAgentIT.aPincodeAddedThatStillCantPlaceABusinessLogsNothing | — | OK-tested |
 | 176 | Colony or street level areas | Pincodes only (decided 2026-11-09) | — | — | — | N/A-v1 |
 
+
+## Support tickets
+
+| # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| 221 | A support person signs in | `/admin/me` designation SUPPORT; `/admin/tickets` 200 | Lands on "My tickets"; tabs Tickets and More only | HelpdeskIT.aSupportPersonIsAddedWithoutPincodesAndSeesOnlyTickets | e2e:tickets "a support person sees only their tickets…" | OK-tested |
+| 222 | A support person types a business, team or strikes address | `/admin/dashboard`, `/admin/shops` 404; `/admin/team` 403 | Taken to their tickets; no business call is made | HelpdeskIT.aSupportPersonIsAdded… | e2e:tickets "a support person sees only…" | OK-tested |
+| 223 | A field agent types `/tickets` | `/admin/tickets` 404 | Taken to the dashboard | HelpdeskIT.aFieldAgentAndACustomerCantSeeTickets | e2e:super "a field agent has no Support…" | OK-tested |
+| 224 | A new ticket from an app or an email | assigned to the support person with fewest open (random on a tie); ack email queued | Appears in their list within 30 s; the tab badge counts it | HelpdeskIT.aCustomersQuestionGoesToTheSupportPerson…, eachTicketGoesToWhoeverHasFewestOpen, ticketsArrivingTogetherAreSpreadEvenly | e2e:tickets | OK-tested |
+| 225 | Nobody in support yet | ticket Unassigned | Super admin: "N unassigned: show them"; By person says to add a support person | HelpdeskIT.withNobodyInSupportTicketsWaitInUnassigned… | e2e:tickets "super admin: counts per person…" | OK-tested |
+| 226 | Who asked | `profile`: Account (name, phone, email, since), Business, Latest bookings; `PROFILE_VIEWED` logged once per half hour | "Who asked" card with each section; an unknown email says there's no profile | HelpdeskIT.aCustomersQuestion…, anEmailFromAnUnknownAddress…, anEmailFromAVerifiedAddressIsMatched… | e2e:tickets "a ticket shows who asked…" | OK-tested |
+| 227 | Reply | `POST …/reply {seenSeq, body}` → WAITING; email queued | "Sent. They get your reply by email."; "An email to them is on its way." | HelpdeskIT.theSupportPersonRepliesAndResolves… | e2e:tickets "they wrote again…" (second send) | OK-tested |
+| 228 | Send & resolve | `resolve: true` → RESOLVED; email says how to reopen | "Sent and resolved…"; box label "Reply (opens it again)" | HelpdeskIT.theSupportPersonRepliesAndResolves… | e2e:tickets "a ticket shows who asked…" | OK-tested |
+| 229 | Double tap on Send | one reply | One call (the button waits) | — | e2e:tickets (dblclick) | OK-tested |
+| 230 | They wrote again while the reply was typed | 409 NEW_MESSAGE | Banner; the ticket re-read shows their message; the typed reply stays; Send again works | HelpdeskIT.aReplyWrittenBeforeTheirNewMessageIsRefused | e2e:tickets "they wrote again…" | OK-tested |
+| 231 | The ticket was given to someone else meanwhile | 409 NOT_YOURS on reply; 404 on open | Banner; opening it: "This ticket isn't yours" | HelpdeskIT.aSupportPersonCantOpenOrAnswerAnotherOnesTicket | e2e:tickets "a ticket that isn't theirs…" | OK-tested |
+| 232 | They deleted their account | requesterEmail null (also on tickets they emailed from that address); emails to them cancelled and blanked; reply 409 REQUESTER_GONE; close 200 | "They deleted their account…"; no reply box; Close without reply | HelpdeskIT.aDeletedAccountsTicketsForgetTheirAddress… | e2e:tickets "close without a reply…" | OK-tested |
+| 233 | Close without reply (spam, mistaken email) | `POST …/close` → RESOLVED, no email | Confirm sheet, then "Closed. Nobody was emailed." | HelpdeskIT.aReplyToAResolvedTicketOpensItAgain… | e2e:tickets "close without a reply…" | OK-tested |
+| 234 | Our email couldn't be sent (Resend down) | tried after 1, 5, 15 min, then FAILED; `emailsFailed` | "One of our emails to them couldn't be sent. Reach them another way (their phone is below)." | HelpdeskIT.aFailingEmailIsTriedAgainThenShownAsFailed | — | OK-tested (backend) |
+| 235 | Super admin gives a ticket to someone | `POST …/assign {version, assigneeId}`; 409 TICKET_CHANGED; 400 NOT_SUPPORT | "Give to someone else": support people with how many they have to answer, Me, Unassigned | HelpdeskIT.aSupportPersonCantOpenOrAnswer… | e2e:tickets "super admin: …giving a ticket…" | OK-tested |
+| 236 | Super admin: by person | `/admin/tickets/stats` | Table: on us, on them, resolved; tap a name to see their tickets (`?who=`) | HelpdeskIT.theSuperAdminSeesHowManyEachPersonHas | e2e:tickets "super admin: counts per person…" | OK-tested |
+| 237 | A support person leaves (removed, made field agent or super admin, account deleted) | their open tickets move to the one with fewest, or Unassigned | Team: "Their open tickets go to the other support people, or to Unassigned." | HelpdeskIT.whenSomeoneLeavesSupportTheirOpenTicketsMove… | — | OK-tested (backend) |
+| 238 | A support person joins | the Unassigned tickets go to them | They appear in their list | HelpdeskIT.withNobodyInSupport… | — | OK-tested (backend) |
+| 239 | Adding a support person | designation SUPPORT, no pincodes (sent ones dropped) | Designation chip Support; pincodes hidden; "Answers only the support tickets…" | HelpdeskIT.aSupportPersonIsAdded… | e2e:tickets "team: a support person is added…" | OK-tested |
+| 240 | Many tickets | 50 a page, newest activity first; next page after (lastMessageAt, id) | "Show more tickets" | — | — | OK-untested |
+| 241 | The list or ticket fails to refresh | — | The last answer stays with a warning | — | — | OK-untested |
+| 242 | INCONVENIENCE: a long reply lost when leaving the page or on a refusal | — | Kept in this browser per ticket until sent | — | e2e:tickets "the typed reply survives leaving" | OK-tested (fixed) |
+| 243 | INCONVENIENCE: the support person can't see who the person is without searching | — | Account, business and latest bookings on the ticket | HelpdeskIT | e2e:tickets | OK-tested (fixed) |
+| 244 | INCONVENIENCE: attachments not visible in the admin website | attachments counted only | "📎 N files attached: open the email in the support Gmail inbox" | InboundEmailTest | — | N/A-v1 (files stay in Gmail) |
+| 245 | INCONVENIENCE: "Support" (strikes) and "Tickets" tabs confused | — | The strikes tab is now "Strikes" ("Customer strikes") | — | e2e:support, e2e:super | OK-tested (fixed) |
+| 246 | INCONVENIENCE: quoted earlier emails make the conversation long | the quoted part ("On … wrote:", "> …") is cut | Only what they wrote this time | InboundEmailTest.cutsTheQuotedConversation | — | OK-tested |
+| 247 | INCONVENIENCE: replying to a resolved ticket | backend: allowed, WAITING again | Box label "Reply (opens it again)" | — | e2e:tickets | OK-tested |
+| 248 | A support person also needs to call the person | phone in Account | The phone is shown in full | — | e2e:tickets | OK-tested |
+| 249 | Six tabs for a super admin on a small phone | — | Labels fit at 360 px (text-xs) | — | e2e:layout | OK-untested (new tab) |
+| 250 | Auto-replies and bounces | ignored, never a ticket | — | HelpdeskIT.autoRepliesBouncesAndOurOwnEmailsAreIgnored | — | OK-tested (backend) |
+| 251 | An email whose sender Cloudflare couldn't prove (no DMARC pass on top) | not matched to an account (no profile); the acknowledgement doesn't quote their words; `senderVerified: false` | "We couldn't prove this email came from …: confirm who it is"; "sender not proven" on the message | HelpdeskIT.aForgedSenderNeverShowsTheAccountNorGetsTheirWordsBack; InboundEmailTest.cloudflaresDmarcPassOnTop… | e2e:tickets "a forged-looking email…" | OK-tested |
+| 252 | A flood of emails from many addresses | past `app.helpdesk.emails-per-hour` (300) new emailed tickets get no acknowledgement (EMAIL_SKIPPED in the history) | History says "No acknowledgement sent" | — | — | OK-untested |
+| 253 | They wrote again while a reply was being typed (seen through the 30 s re-read) | — | "They wrote again while you were typing: read it above. I've read it"; Send waits for it | — | e2e:tickets "they wrote again…" | OK-tested |
+| 254 | Close without reply after they wrote again | 409 NEW_MESSAGE (`seenSeq`) | The sheet says so; the ticket is re-read | HelpdeskIT.closingWithoutReadingTheirNewMessageIsRefused | — | OK-tested (backend) |
+| 255 | The ticket moves to someone else while it is open | 404 on the re-read; 409 NOT_YOURS on Send | "This ticket isn't yours" (a super admin: "Ticket not found"), never "couldn't refresh" | HelpdeskIT.aSupportPersonCantOpenOrAnswer… | e2e:tickets "a ticket that isn't theirs…" | OK-tested |
+| 256 | Give to someone else after it changed elsewhere | 409 TICKET_CHANGED | The ticket is re-read, so the next tap works | — | — | OK-untested |
+| 257 | A support person's own question (Need help) | never given to them (Unassigned if nobody else); assign to them 400 OWN_TICKET | They aren't offered in "Give to" | HelpdeskIT.aSupportPersonsOwnQuestionGoesToSomeoneElse | — | OK-tested (backend) |
+| 258 | A super admin holding tickets is made a field agent or removed | their open tickets go to the support people (or Unassigned) | — | HelpdeskIT.aSuperAdminHoldingTicketsHandsThemOnWhenMadeAFieldAgent | — | OK-tested (backend) |
+| 259 | The person (or a support person) deleted their account | "Deleted account", never a blank name | — | HelpdeskIT.aDeletedAccountShowsAsDeletedAccountNotBlank | — | OK-tested (backend) |
+| 260 | They changed their verified email after asking | our replies go to the new address; their reply from it joins the ticket | — | HelpdeskIT.aReplyFromTheirNewVerifiedEmailJoins… | — | OK-tested (backend) |
+| 261 | Two people on one browser | unsent replies are kept per person and forgotten on sign-out | — | — | e2e:tickets "signing out forgets unsent replies…" | OK-tested |
+| 262 | A ticket number or bad id typed into the address | 400 | "Ticket not found" / "isn't yours", no useless Try again | — | — | OK-untested |
+| 263 | Switching a field agent to Support | pincodes dropped (their waiting visits move) | "A support person covers no pincodes: their N pincodes are removed when you save." | FieldAgentIT | — | OK-untested (app) |
+| 264 | Switching the list's view on a slow connection | — | The old rows are dimmed while the new ones load | — | — | OK-untested |
+| 265 | Calling the person | — | Their phone in "Who asked" is a tap-to-call link | — | e2e:tickets "a forged-looking email…" | OK-tested |
+| 266 | INCONVENIENCE (open, needs a decision): search tickets by number, email or phone; open "N other tickets"; "Move open tickets" for an away support person; "Open again" without emailing; attachments in the admin | — | Not in this version | — | — | N/A-v1 (asked) |
+
 ## Site-wide
 
 | # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |

@@ -8,7 +8,7 @@ import { TestModeBanner } from '../components/TestModeBanner'
 import { ErrorState, Loading } from '../components/ui'
 import { forgetReturn, nextAfterSignIn, rememberReturn } from '../features/auth/flow'
 import { NotTeam } from '../features/auth/NotTeam'
-import { isSuperAdmin, isTeam, roleOf } from '../lib/roles'
+import { handlesTickets, isSuperAdmin, isSupport, isTeam, roleOf } from '../lib/roles'
 import { missingSteps, useSession } from '../store/session'
 
 /** Screens for signed-out people only (sign-in); a signed-in person goes on to the app. */
@@ -81,13 +81,14 @@ export function AdminGate() {
   const qc = useQueryClient()
   // A field agent and a super admin see different businesses under the same addresses: when the role changes,
   // what was read under the old one is forgotten, so nothing of it shows under the new one
-  const role = me.data?.adminRole
+  const role = me.data ? `${me.data.adminRole}:${me.data.designation ?? ''}` : undefined
   const lastRole = useRef(role)
   useEffect(() => {
     if (role && lastRole.current && role !== lastRole.current) {
       qc.resetQueries({ queryKey: keys.dashboard })
       qc.resetQueries({ queryKey: keys.shops })
       qc.resetQueries({ queryKey: keys.shopPages })
+      qc.resetQueries({ queryKey: keys.tickets })
     }
     if (role) lastRole.current = role
   }, [role, qc])
@@ -107,9 +108,23 @@ export function AdminGate() {
   )
 }
 
-/** Support, Team and Test mode: super admins only. A field agent who types the address goes to the dashboard. */
+/** Strikes, Team and Test mode: super admins only. Anyone else who types the address goes to their first page. */
 export function SuperAdminOnly() {
   const me = useAdmin()
-  if (!isSuperAdmin(me.adminRole)) return <Navigate to="/" replace />
+  if (!isSuperAdmin(me.adminRole)) return <Navigate to={isSupport(me.adminRole, me.designation) ? '/tickets' : '/'} replace />
+  return <Outlet />
+}
+
+/** The businesses (dashboard, lists, a shop): the field team. A support person goes to their tickets instead. */
+export function FieldTeamOnly() {
+  const me = useAdmin()
+  if (isSupport(me.adminRole, me.designation)) return <Navigate to="/tickets" replace />
+  return <Outlet />
+}
+
+/** Tickets: support people and super admins. A field agent goes to the dashboard. */
+export function TicketsOnly() {
+  const me = useAdmin()
+  if (!handlesTickets(me.adminRole, me.designation)) return <Navigate to="/" replace />
   return <Outlet />
 }

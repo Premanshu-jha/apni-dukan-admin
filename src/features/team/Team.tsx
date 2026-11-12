@@ -55,7 +55,7 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
   const team = useTeam()
   const [removing, setRemoving] = useState<TeamMember | null>(null)
   const [moving, setMoving] = useState<TeamMember | null>(null)
-  const agents = (team.data ?? []).filter((m) => m.adminRole === 'ADMIN')
+  const agents = (team.data ?? []).filter((m) => m.designation === 'FIELD_AGENT')
 
   return (
     <>
@@ -91,7 +91,12 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
                     </Pill>
                     on the team since {dateIst(m.since)}
                   </div>
-                  {m.adminRole === 'ADMIN' && (
+                  {m.designation === 'SUPPORT' && (
+                    <p className="text-sm text-muted">
+                      {m.openTickets ?? 0} open {(m.openTickets ?? 0) === 1 ? 'ticket' : 'tickets'}
+                    </p>
+                  )}
+                  {m.designation === 'FIELD_AGENT' && (
                     <p className="text-sm">
                       {m.pincodes.length === 0 ? (
                         <span className="text-warn">No pincodes yet: gets no businesses</span>
@@ -113,7 +118,7 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
                   >
                     Edit
                   </Link>
-                  {m.adminRole === 'ADMIN' && m.pendingVisits > 0 && (
+                  {m.designation === 'FIELD_AGENT' && m.pendingVisits > 0 && (
                     <Button variant="secondary" className="flex-1 text-sm" onClick={() => setMoving(m)} aria-label={`Move ${m.name || m.phone}'s waiting visits`}>
                       Move waiting visits
                     </Button>
@@ -212,6 +217,7 @@ function RemoveMember({
         <p className="text-muted">
           They lose access to this site and are signed out at once.
           {member.pendingVisits > 0 && ' Their waiting visits go to other field agents covering those pincodes, or to Unassigned.'}
+          {(member.openTickets ?? 0) > 0 && ' Their open support tickets go to the other support people, or to Unassigned.'}
         </p>
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
         <div className="flex gap-2">
@@ -302,7 +308,7 @@ function Coverage() {
   const [q, setQ] = useState('')
   const typed = q.replace(/\D/g, '')
   const shown = useMemo(() => (coverage.data ?? []).filter((c) => c.pincode.startsWith(typed)), [coverage.data, typed])
-  const idle = (team.data ?? []).filter((m) => m.adminRole === 'ADMIN' && m.pincodes.length === 0)
+  const idle = (team.data ?? []).filter((m) => m.designation === 'FIELD_AGENT' && m.pincodes.length === 0)
 
   if (coverage.isPending) return <Loading />
   if (coverage.isError && !coverage.data) return <ErrorState message={explain(coverage.error)} onRetry={() => void coverage.refetch()} />

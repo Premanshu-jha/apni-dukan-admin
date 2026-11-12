@@ -118,5 +118,5 @@ export function eventLabel(e: Pick<TimelineEntry, 'event' | 'byName' | 'byAdmin'
 export const STRIKE_LABELS: Record<StrikeKind, string> = { NO_SHOW: 'No-show', LATE_CANCEL: 'Late cancel' }
 
 export const ROLE_LABELS: Record<AdminRole, string> = { NONE: 'Not on the team', ADMIN: 'Admin', SUPER_ADMIN: 'Super admin' }
-export const DESIGNATION_LABELS: Record<Designation, string> = { FIELD_AGENT: 'Field agent' }
-export const DESIGNATIONS: Designation[] = ['FIELD_AGENT']
+export const DESIGNATION_LABELS: Record<Designation, string> = { FIELD_AGENT: 'Field agent', SUPPORT: 'Support' }
+export const DESIGNATIONS: Designation[] = ['FIELD_AGENT', 'SUPPORT']

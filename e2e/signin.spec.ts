@@ -88,7 +88,7 @@ test('recovery with email: codes to the email and the new number, then in', asyn
 test('taken off the team: the old token gets 401, the refresh says NONE, /admin/me answers 403; the screen follows', async ({ page, context, api }) => {
   await atDashboard(page, context, api)
   api.removeFromTeam()
-  await page.getByRole('link', { name: 'Support' }).click()
+  await page.getByRole('link', { name: 'Strikes' }).click()
   await page.getByLabel("Customer's mobile number").fill('9811122233')
   await page.getByRole('button', { name: 'Look up' }).click()
   await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()

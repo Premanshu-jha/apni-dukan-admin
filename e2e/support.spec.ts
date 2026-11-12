@@ -9,7 +9,7 @@ test("support looks up a customer's strikes and removes one with a reason (a dou
   api.customers.set('9811122233', { customerId: 'c1', blockedUntil: new Date(Date.now() + 3 * 86400_000).toISOString(), strikes: strikes() })
   await signedIn(context, api)
   await page.goto('/')
-  await page.getByRole('link', { name: 'Support' }).click()
+  await page.getByRole('link', { name: 'Strikes' }).click()
   const look = page.getByRole('button', { name: 'Look up' })
   await expect(look).toBeDisabled()
   await page.getByLabel("Customer's mobile number").fill('+91 98111 22233')

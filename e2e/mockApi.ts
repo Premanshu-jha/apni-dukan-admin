@@ -27,6 +27,31 @@ export interface MockUser {
   emailVerified: boolean
   admin: boolean
   adminRole: AdminRole
+  /** An ADMIN's designation (FIELD_AGENT when missing). */
+  designation?: 'FIELD_AGENT' | 'SUPPORT'
+}
+
+/** A support ticket as the fake keeps it: the TicketDetail fields, plus who it's with. */
+export interface MockTicket {
+  id: string
+  number: string
+  subject: string
+  status: 'OPEN' | 'WAITING' | 'RESOLVED'
+  source: 'EMAIL' | 'CUSTOMER' | 'PARTNER'
+  requester: string
+  requesterId: string | null
+  requesterEmail: string | null
+  assigneeId: string | null
+  createdAt: string
+  lastMessageAt: string
+  messages: Json[]
+  events: Json[]
+  profile: Json[]
+  emailsWaiting: number
+  emailsFailed: number
+  version: number
+  /** False: the first email's sender couldn't be proven. */
+  senderVerified?: boolean
 }
 
 export interface Call {
@@ -529,9 +554,115 @@ export class MockApi {
         name: this.user.name,
         phone: this.user.phone,
         adminRole: this.user.adminRole,
-        designation: this.user.adminRole === 'ADMIN' ? 'FIELD_AGENT' : null,
+        designation: this.user.adminRole === 'ADMIN' ? (this.user.designation ?? 'FIELD_AGENT') : null,
         testMode: { on, until: on ? this.testMode.until : null },
       })
+    }
+
+    // ---------- support tickets (TicketService) ----------
+    const support = this.user.adminRole === 'ADMIN' && this.user.designation === 'SUPPORT'
+    if (p.startsWith('/admin/tickets')) {
+      if (!support && !isSuper) return fail(404, 'NOT_FOUND', 'Not found.')
+      const names = (id: string | null) => (id === null ? null : (this.team.find((m) => m.userId === id)?.name as string | undefined) ?? 'Someone')
+      const summary = (t: MockTicket) => ({
+        id: t.id, number: t.number, subject: t.subject, status: t.status, source: t.source, requester: t.requester,
+        assigneeId: t.assigneeId, assigneeName: names(t.assigneeId), createdAt: t.createdAt, lastMessageAt: t.lastMessageAt,
+      })
+      const detail = (t: MockTicket) => ({
+        ticket: summary(t), requesterId: t.requesterId, requesterEmail: t.requesterEmail, messages: t.messages,
+        events: t.events, profile: t.profile, earlierTickets: 0, emailsWaiting: t.emailsWaiting, emailsFailed: t.emailsFailed,
+        lastIncomingSeq: Math.max(0, ...t.messages.filter((m) => m.direction === 'IN').map((m) => m.seq as number)),
+        version: t.version,
+        senderVerified: t.senderVerified ?? true,
+      })
+      if (p === '/admin/tickets' && method === 'GET') {
+        const view = url.searchParams.get('view') ?? 'ACTIVE'
+        if (view === 'UNASSIGNED' && !isSuper) return superOnly()
+        const statuses = view === 'OPEN' ? ['OPEN'] : view === 'WAITING' ? ['WAITING'] : view === 'RESOLVED' ? ['RESOLVED'] : ['OPEN', 'WAITING']
+        const assignee = support ? this.user.id : url.searchParams.get('assignee')
+        const rows = this.tickets
+          .filter((t) => statuses.includes(t.status))
+          .filter((t) => (view === 'UNASSIGNED' ? t.assigneeId === null : assignee ? t.assigneeId === assignee : true))
+          .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt) || a.id.localeCompare(b.id))
+        const before = url.searchParams.get('before')
+        const beforeId = url.searchParams.get('beforeId')
+        // As TicketStore.list: after the cursor by time, then by id among equal times (a row that moved doesn't matter)
+        const after = before ? rows.filter((t) => t.lastMessageAt < before || (t.lastMessageAt === before && t.id > String(beforeId))) : rows
+        return ok(200, after.slice(0, 50).map(summary))
+      }
+      if (p === '/admin/tickets/counts') {
+        const mineOpen = this.tickets.filter((t) => t.assigneeId === this.user.id && t.status === 'OPEN').length
+        const unassigned = isSuper ? this.tickets.filter((t) => t.assigneeId === null && t.status !== 'RESOLVED').length : 0
+        return ok(200, { mineOpen, unassigned })
+      }
+      if (p === '/admin/tickets/stats') {
+        if (!isSuper) return superOnly()
+        const people = this.team
+          .filter((m) => m.designation === 'SUPPORT' || this.tickets.some((t) => t.assigneeId === m.userId))
+          .map((m) => {
+            const mine = this.tickets.filter((t) => t.assigneeId === m.userId)
+            return { userId: m.userId, name: m.name, support: m.designation === 'SUPPORT', open: mine.filter((t) => t.status === 'OPEN').length,
+              waiting: mine.filter((t) => t.status === 'WAITING').length, resolved: mine.filter((t) => t.status === 'RESOLVED').length }
+          })
+        return ok(200, { people, unassigned: this.tickets.filter((t) => t.assigneeId === null && t.status !== 'RESOLVED').length })
+      }
+      const m = p.match(/^\/admin\/tickets\/([^/]+)(\/reply|\/close|\/assign)?$/)
+      // The backend's ids are UUIDs (the fake's are t1001…): anything else is a 400 from the path's conversion
+      if (m && !/^(t\d+|[0-9a-f-]{36})$/.test(decodeURIComponent(m[1]))) return fail(400, 'VALIDATION_FAILED', 'Some fields are not valid', { id: 'not valid' })
+      const t = m ? this.tickets.find((x) => x.id === decodeURIComponent(m[1])) : undefined
+      if (!m || !t) return fail(404, 'NOT_FOUND', 'Ticket not found.')
+      // TicketService.assign: super admins only, checked first
+      if (m[2] === '/assign' && !isSuper) return superOnly()
+      if (support && t.assigneeId !== this.user.id) {
+        return m[2] ? fail(409, 'NOT_YOURS', 'This ticket was given to someone else meanwhile.') : fail(404, 'NOT_FOUND', 'Ticket not found.')
+      }
+      const now = new Date().toISOString()
+      if (!m[2]) return ok(200, detail(t))
+      if (m[2] === '/reply') {
+        const text = String(body.body ?? '').trim()
+        if (!text || text.length > 5000) return invalid({ body: 'write 1 to 5000 characters' })
+        if (t.requesterEmail === null) return fail(409, 'REQUESTER_GONE', 'They deleted their account, so there is no address to send a reply to. Close the ticket instead.')
+        if (detail(t).lastIncomingSeq > Number(body.seenSeq)) return fail(409, 'NEW_MESSAGE', 'They wrote again while you were typing. Read their new message, then send your reply.')
+        if (t.assigneeId === null) {
+          t.assigneeId = this.user.id
+          t.events.push({ event: 'ASSIGNED', actor: this.user.name, detail: `Taken by ${this.user.name}`, at: now })
+        }
+        t.messages.push({ seq: t.messages.length + 1, direction: 'OUT', author: this.user.name, body: text, attachments: 0, senderVerified: true, at: now })
+        t.status = body.resolve ? 'RESOLVED' : 'WAITING'
+        t.lastMessageAt = now
+        t.emailsWaiting += 1
+        t.version += 1
+        t.events.push({ event: body.resolve ? 'RESOLVED' : 'REPLIED', actor: this.user.name, detail: null, at: now })
+        this.replies.push({ id: t.id, body: text, resolve: !!body.resolve })
+        return ok(200, detail(t))
+      }
+      if (m[2] === '/close') {
+        if (detail(t).lastIncomingSeq > Number(body.seenSeq)) return fail(409, 'NEW_MESSAGE', 'They wrote again. Read their new message before closing the ticket.')
+        if (t.status !== 'RESOLVED') {
+          if (t.assigneeId === null) t.assigneeId = this.user.id
+          t.status = 'RESOLVED'
+          t.version += 1
+          t.events.push({ event: 'RESOLVED', actor: this.user.name, detail: 'Closed without a reply', at: now })
+        }
+        return ok(200, detail(t))
+      }
+      const to = (body.assigneeId as string | null) ?? null
+      const holder = to === null ? null : this.team.find((x) => x.userId === to)
+      if (to !== null && !(holder && (holder.designation === 'SUPPORT' || holder.adminRole === 'SUPER_ADMIN'))) {
+        return fail(400, 'NOT_SUPPORT', "That person isn't in support. Choose a support person.")
+      }
+      if (to !== null && to === t.requesterId) return fail(400, 'OWN_TICKET', "That's their own question: give it to someone else.")
+      if (Number(body.version) !== t.version) return fail(409, 'TICKET_CHANGED', 'This ticket changed meanwhile. Check it again, then choose.')
+      if (t.assigneeId !== to) {
+        t.assigneeId = to
+        t.version += 1
+        t.events.push({ event: to === null ? 'UNASSIGNED' : 'REASSIGNED', actor: this.user.name, detail: null, at: now })
+      }
+      return ok(200, detail(t))
+    }
+    // The businesses are the field team's: a support person gets 404 (TeamRole.onTeam is false for them)
+    if (support && (p === '/admin/dashboard' || p.startsWith('/admin/shops') || p.startsWith('/admin/assignments'))) {
+      return fail(404, 'NOT_FOUND', 'Not found.')
     }
 
     if (p === '/admin/dashboard') {
@@ -996,6 +1127,49 @@ export class MockApi {
     return fail(404, 'NOT_FOUND', `No route ${method} ${p}`)
   }
 
+  /** Support tickets (TicketService), newest last added. */
+  tickets: MockTicket[] = []
+  /** Every reply sent, in order (one per tap that reached the backend). */
+  replies: Array<{ id: string; body: string; resolve: boolean }> = []
+
+  /** A ticket with one message from the person; open, given to `assigneeId` (default: the signed-in person). */
+  addTicket(over: Partial<MockTicket> & { message?: string } = {}): MockTicket {
+    const n = 1001 + this.tickets.length
+    const at = over.createdAt ?? new Date(Date.now() - 3600_000).toISOString()
+    const t: MockTicket = {
+      id: `t${n}`,
+      number: `CLZ-${n}`,
+      subject: 'My booking shows cancelled',
+      status: 'OPEN',
+      source: 'CUSTOMER',
+      requester: 'Ravi Customer',
+      requesterId: 'c1',
+      requesterEmail: 'ravi@gmail.com',
+      assigneeId: this.user.id,
+      createdAt: at,
+      lastMessageAt: at,
+      messages: [{ seq: 1, direction: 'IN', author: over.requester ?? 'Ravi Customer', body: over.message ?? 'The salon says it is fine but the app shows cancelled.', attachments: 0, senderVerified: true, at }],
+      events: [{ event: 'CREATED', actor: null, detail: 'From the customer app', at }],
+      profile: [{ order: 10, title: 'Account', lines: ['Name: Ravi Customer', 'Phone: 9811122233', 'Email: ravi@gmail.com (verified)'] }],
+      emailsWaiting: 0,
+      emailsFailed: 0,
+      version: 0,
+      ...over,
+    }
+    this.tickets.push(t)
+    return t
+  }
+
+  /** The person wrote again (a reply to our email): the ticket waits on us again. */
+  incoming(id: string, text: string) {
+    const t = this.tickets.find((x) => x.id === id)!
+    const at = new Date().toISOString()
+    t.messages.push({ seq: t.messages.length + 1, direction: 'IN', author: t.requester, body: text, attachments: 0, senderVerified: true, at })
+    t.status = 'OPEN'
+    t.lastMessageAt = at
+    t.version += 1
+  }
+
   /** Field agents who work in a shop ("agentId:shopId"): never assigned it (409 OWN_SHOP). */
   agentWorksIn = new Set<string>()
 
@@ -1011,8 +1185,8 @@ export class MockApi {
     const role = body.role
     if (role !== 'ADMIN' && role !== 'SUPER_ADMIN') errors.role = 'choose Admin or Super admin'
     let pincodes: string[] = []
-    if (role === 'ADMIN') {
-      if (body.designation !== 'FIELD_AGENT') errors.designation = 'choose a designation'
+    if (role === 'ADMIN' && body.designation !== 'FIELD_AGENT' && body.designation !== 'SUPPORT') errors.designation = 'choose a designation'
+    if (role === 'ADMIN' && body.designation === 'FIELD_AGENT') {
       const list = Array.isArray(body.pincodes) ? (body.pincodes as unknown[]).map((x) => String(x ?? '').trim()) : []
       const bad = list.filter((x) => !/^[1-9]\d{5}$/.test(x))
       pincodes = [...new Set(list)].sort()
@@ -1025,7 +1199,7 @@ export class MockApi {
     }
     return {
       phone: digits,
-      member: { phone: digits, email, name: cleanText(String(body.name)), adminRole: role, designation: role === 'ADMIN' ? 'FIELD_AGENT' : null, pincodes },
+      member: { phone: digits, email, name: cleanText(String(body.name)), adminRole: role, designation: role === 'ADMIN' ? body.designation : null, pincodes, openTickets: 0 },
     }
   }
 

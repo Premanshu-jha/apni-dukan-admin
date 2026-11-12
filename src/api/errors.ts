@@ -135,6 +135,9 @@ const FIELD_NAMES: Record<string, string> = {
   designation: 'The designation:',
   role: 'The role:',
   q: 'The search:',
+  body: 'The reply:',
+  message: 'The message:',
+  subject: 'The subject:',
 }
 
 /** "Too many tries from this network. Try again in 4 minutes." (from Retry-After; at least a minute). */
