@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router'
 import { useAdmin } from '../../app/guards'
 import { Button, Card, Page, Pill } from '../../components/ui'
 import { DESIGNATION_LABELS, ROLE_LABELS } from '../../lib/labels'
 import { formatPhone } from '../../lib/phone'
 import { signOutHere } from '../auth/signOut'
 
-/** More: who is signed in, and Sign out. */
+/** More: who is signed in, Test mode (super admins), and Sign out. */
 export function More() {
   const me = useAdmin()
   const qc = useQueryClient()
@@ -20,6 +21,15 @@ export function More() {
           </Pill>
         </div>
       </Card>
+      {me.adminRole === 'SUPER_ADMIN' && (
+        <Link
+          to="/test-mode"
+          className="flex min-h-12 items-center justify-between rounded-xl border border-line bg-surface px-4 font-semibold hover:bg-raised"
+        >
+          <span>⚑ Test mode</span>
+          <span aria-hidden>›</span>
+        </Link>
+      )}
       <Button
         variant="danger"
         onClick={() => signOutHere(qc)}
