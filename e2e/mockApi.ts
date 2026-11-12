@@ -55,6 +55,8 @@ export interface ShopExtra {
   /** The salon video's signed link (salons), or null. */
   videoUrl: string | null
   timeline: Json[]
+  /** The owner's address change request waiting for the field team (AddressRequestStore), or null. */
+  addressRequest?: Json | null
 }
 
 /** A real 20-second video (64×64, VP9 in MP4). */
@@ -321,7 +323,8 @@ export class MockApi {
   }
 
   private view(shop: Json): Json {
-    return { ...shop, group: this.groupOf(shop), statusSince: this.extra.get(shop.id as string)!.statusSince, waitingForVisit: this.waits(shop) }
+    const x = this.extra.get(shop.id as string)!
+    return { ...shop, group: this.groupOf(shop), statusSince: x.statusSince, waitingForVisit: this.waits(shop), addressRequested: Boolean(x.addressRequest) }
   }
 
   /** Waiting for a visit (Shop.waitingForVisit): its first, a reinstated one's, or a live shop's re-check. */
@@ -686,6 +689,49 @@ export class MockApi {
       shop.version = (shop.version as number) + 1
       return ok(200, this.view(shop))
     }
+    // ---- The address: the owner's request declined, or set by the field team (ShopAdminService) ----
+    const addressPath = p.match(/^\/admin\/shops\/([^/]+)\/(address|address-request\/decline)$/)
+    if (addressPath && ((addressPath[2] === 'address' && method === 'PATCH') || (addressPath[2] !== 'address' && method === 'POST'))) {
+      const shop = this.shops.find((s) => s.id === addressPath[1])
+      if (!shop || !this.sees(shop)) return fail(404, 'NOT_FOUND', 'No such shop.')
+      if (this.memberOf.has(shop.id as string)) return fail(403, 'OWN_SHOP', "You can't decide on a shop you belong to. Ask another admin.")
+      // The request body (@Valid) first, then the status, then the version, as the backend
+      if (typeof body.version !== 'number') return invalid({ version: 'is required' })
+      const bad: Json = {}
+      if (addressPath[2] !== 'address') {
+        const problem = textProblem(body.reason, 2, 200)
+        if (problem) bad.reason = problem
+      } else {
+        for (const [k, min, max] of [['addressLine', 5, 200], ['area', 2, 100], ['city', 2, 60]] as const) {
+          const problem = textProblem(body[k], min, max)
+          if (problem) bad[k] = problem
+        }
+        if (!/^[1-9]\d{5}$/.test(body.pincode ?? '')) bad.pincode = 'must be a 6-digit pincode'
+        if (!(body.latitude >= 6 && body.latitude <= 37.6)) bad.latitude = 'must be between 6.0 and 37.6'
+        if (!(body.longitude >= 68 && body.longitude <= 97.5)) bad.longitude = 'must be between 68.0 and 97.5'
+      }
+      if (Object.keys(bad).length) return invalid(bad)
+      if (shop.status === 'CLOSED') return fail(409, 'WRONG_STATUS', `A shop that is CLOSED can't be changed. Someone may have decided already; reload.`, { status: 'CLOSED' })
+      if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop changed after you loaded it. Reload and check the new details first.')
+      const x = this.extra.get(shop.id as string)!
+      if (addressPath[2] !== 'address') {
+        if (!x.addressRequest) return fail(409, 'NO_ADDRESS_REQUEST', 'No address change waits for this shop any more. Reload.')
+        x.addressRequest = null
+        x.timeline.unshift({ at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, note: `Address change declined: ${cleanText(body.reason)}`, checklist: [] })
+        shop.version = (shop.version as number) + 1
+        return ok(200, this.view(shop))
+      }
+      // ShopService.moveByFieldTeam: the same place changes nothing (no version, no note, a waiting request stays)
+      const same = cleanText(body.addressLine) === shop.addressLine && cleanText(body.area) === shop.area
+        && cleanText(body.city) === shop.city && body.pincode === shop.pincode && body.latitude === shop.latitude && body.longitude === shop.longitude
+      if (same) return ok(200, this.view(shop))
+      const old = `${shop.addressLine as string}, ${shop.area as string}, ${shop.city as string} ${shop.pincode as string}`
+      Object.assign(shop, { addressLine: cleanText(body.addressLine), area: cleanText(body.area), city: cleanText(body.city), pincode: body.pincode, latitude: body.latitude, longitude: body.longitude })
+      x.addressRequest = null   // the owner's waiting request is answered by this
+      x.timeline.unshift({ at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, note: `Address changed by the field team: ${old} → ${shop.addressLine as string}, ${shop.area as string}, ${shop.city as string} ${shop.pincode as string}`, checklist: [] })
+      shop.version = (shop.version as number) + 1
+      return ok(200, this.view(shop))
+    }
     const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|ask-to-fix|notes))?$/)
     if (shopPath) {
       const action = shopPath[2]
@@ -708,6 +754,7 @@ export class MockApi {
           // Signed again on each read, as the backend does (a new query each time)
           videoUrl: x.videoUrl ? `${x.videoUrl}?sig=${++this.videoSigs}` : null,
           registrationDoc: x.registrationDoc,
+          addressRequest: x.addressRequest ?? null,
           timeline: first.items,
           timelineNext: first.next,
         })
@@ -766,6 +813,12 @@ export class MockApi {
         shop.statusReason = needsReason ? reason : null
         shop.version = (shop.version as number) + 1
         if (action === 'approve') {
+          // The owner's waiting address change request is applied with it
+          const r = x.addressRequest
+          if (r) {
+            Object.assign(shop, { addressLine: r.addressLine, area: r.area, city: r.city, pincode: r.pincode, latitude: r.latitude, longitude: r.longitude })
+            x.addressRequest = null
+          }
           x.approvedBefore = true
           x.changes = []
           x.pinMovedMetres = null
