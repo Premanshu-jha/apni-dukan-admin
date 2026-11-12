@@ -252,7 +252,17 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
   Send back is only for a first visit (it would take a working salon off the app). A lost answer counts as done only
   when the re-read shows it. With an older backend (no `waitingForVisit`) only PENDING_VISIT waits, as before.
 - The Live list says "Last checked … ago" (its time is the last approval, also a re-check's).
-- Scenarios 119, 156 updated, 201–207 added in `docs/scenarios.md`.
+- **The owner's address change request** (needs backend V44; `AddressSection.tsx`): an "Address change" badge on the
+  list's card, and on the business page "The owner asks for a new address": the address now and the one asked for,
+  each with its pin on Google Maps (and Navigate there), and how far the pin moves. **Approve** applies it (the sheet
+  says so); **Decline the new address** asks for the reason the owner is told. A request changed or taken back
+  meanwhile answers "This business changed…" and reloads.
+- **Change address** on the business page (`PATCH /admin/shops/{id}/address`): the field team sets the address and
+  pin themselves (typed, from this phone's location at the door, or starting from the owner's request, with "Check
+  the pin on Google Maps"); the backend's limits are checked before sending, an unchanged address isn't sent, and the
+  version from when the form was opened is sent, so a change made meanwhile is refused instead of overwritten (the
+  form keeps what was typed). The owner is told.
+- Scenarios 119, 156 and 206 updated; 201–205 and 207–220 added in `docs/scenarios.md`.
 
 ### 0.8.0 — 2026-11-11
 
