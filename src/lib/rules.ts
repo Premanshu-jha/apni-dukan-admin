@@ -1,4 +1,4 @@
-import type { ChecklistItem, ShopStatus } from '../api/types'
+import type { AdminShop, ChecklistItem, ShopStatus } from '../api/types'
 import { CHECKLIST, CHECKLIST_LABELS } from './labels'
 import { normalizePhone } from './phone'
 
@@ -10,14 +10,30 @@ export const LABEL_MAX = 60
 export const HOURS_MIN = 1
 export const HOURS_MAX = 8
 
-export type Decision = 'approve' | 'reject' | 'suspend' | 'reinstate'
+/** The decision's path too: POST /admin/shops/{id}/{decision}. */
+export type Decision = 'approve' | 'reject' | 'suspend' | 'reinstate' | 'ask-to-fix'
+
+/** Waiting for a visit: PENDING_VISIT, or a live shop waiting for its re-check (an older backend: PENDING_VISIT only). */
+export function waitingForVisit(shop: Pick<AdminShop, 'status' | 'waitingForVisit'>): boolean {
+  return shop.waitingForVisit ?? shop.status === 'PENDING_VISIT'
+}
+
+/** A live shop whose changes wait for the field team's check: it stays live (customers book it) meanwhile. */
+export function liveRecheck(shop: Pick<AdminShop, 'status' | 'waitingForVisit'>): boolean {
+  return shop.status === 'APPROVED' && waitingForVisit(shop)
+}
 
 /**
- * The decision buttons each status offers (Add note is always there). A sent-back draft waits for the owner. A field
- * agent only approves or sends back (suspending and reinstating are for super admins).
+ * The decision buttons each shop offers (Add note is always there). A sent-back draft waits for the owner. A field
+ * agent only approves, sends back or asks for a fix (suspending and reinstating are for super admins). `waiting`: a
+ * live shop waiting for its re-check is approved (its changes checked) or the owner is asked to fix something; it is
+ * never sent back (that would take a working salon off the app).
  */
-export function decisionsFor(status: ShopStatus, superAdmin = true): Decision[] {
-  if (!superAdmin) return status === 'PENDING_VISIT' ? ['approve', 'reject'] : []
+export function decisionsFor(status: ShopStatus, superAdmin = true, waiting = status === 'PENDING_VISIT'): Decision[] {
+  const live = status === 'APPROVED' && waiting
+  const decide: Decision[] = live ? ['approve', 'ask-to-fix'] : status === 'PENDING_VISIT' ? ['approve', 'reject'] : []
+  if (!superAdmin) return decide
+  if (decide.length) return [...decide, 'suspend']
   switch (status) {
     case 'PENDING_VISIT':
       return ['approve', 'reject', 'suspend']
@@ -35,11 +51,12 @@ export const DECISION_LABELS: Record<Decision, string> = {
   reject: 'Send back',
   suspend: 'Suspend',
   reinstate: 'Reinstate',
+  'ask-to-fix': 'Ask the owner to fix',
 }
 
 /** Send back and Suspend need a reason for the owner; Approve and Reinstate only confirm. */
 export function needsReason(d: Decision): boolean {
-  return d === 'reject' || d === 'suspend'
+  return d === 'reject' || d === 'suspend' || d === 'ask-to-fix'
 }
 
 /** A starting reason from the ticked items, in checklist order ("Shop was shut. Owner photo unclear."). */

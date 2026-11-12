@@ -88,6 +88,12 @@ export interface AdminShop {
   statusSince: string
   /** The field agent who visits it; null when unassigned (missing from a backend older than field agents). */
   assignedTo?: Assignee | null
+  /**
+   * Waiting for the field team: its first visit, a reinstated one's, or a live shop's re-check (status APPROVED: it
+   * stays live while its changes are checked). Approve, Send back and Assign are for these. Missing from an older
+   * backend: there, only PENDING_VISIT waits.
+   */
+  waitingForVisit?: boolean
 }
 
 export interface Assignee {
@@ -139,6 +145,7 @@ export type TimelineEvent =
   | 'NOTE'
   | 'CLOSED'
   | 'HANDED_OVER'
+  | 'FIX_ASKED'
 
 export interface TimelineEntry {
   at: string
