@@ -41,6 +41,8 @@ export interface Call {
 /** The parts of a shop's page that are not the AdminShop itself. */
 export interface ShopExtra {
   approvedBefore: boolean
+  /** A live shop waiting for its re-check (the backend's recheck_since): it stays APPROVED meanwhile. */
+  rechecking: boolean
   statusSince: string
   /** SalonFacts (the field team's facts about a salon); null for a kirana. */
   salon: Json | null
@@ -232,7 +234,7 @@ export class MockApi {
 
   /** Waiting businesses assigned to each member, as pendingVisits. */
   private withPending(m: Json): Json {
-    const pendingVisits = this.shops.filter((s) => s.status === 'PENDING_VISIT' && (s.assignedTo as Json | null)?.id === m.userId).length
+    const pendingVisits = this.shops.filter((s) => this.waits(s) && (s.assignedTo as Json | null)?.id === m.userId).length
     return { ...m, pendingVisits }
   }
 
@@ -266,6 +268,7 @@ export class MockApi {
     this.shops.push(shop)
     this.extra.set(shop.id as string, {
       approvedBefore: false,
+      rechecking: false,
       statusSince: ago(3 * 24 * 60),
       salon: shop.type === 'SALON' ? {
         barbers: 2,
@@ -307,7 +310,7 @@ export class MockApi {
       case 'DRAFT':
         return shop.statusReason ? 'SENT_BACK' : null
       case 'APPROVED':
-        return 'LIVE'
+        return x.rechecking ? 'RECHECK' : 'LIVE'
       case 'SUSPENDED':
         return 'SUSPENDED'
       case 'CLOSED':
@@ -318,7 +321,12 @@ export class MockApi {
   }
 
   private view(shop: Json): Json {
-    return { ...shop, group: this.groupOf(shop), statusSince: this.extra.get(shop.id as string)!.statusSince }
+    return { ...shop, group: this.groupOf(shop), statusSince: this.extra.get(shop.id as string)!.statusSince, waitingForVisit: this.waits(shop) }
+  }
+
+  /** Waiting for a visit (Shop.waitingForVisit): its first, a reinstated one's, or a live shop's re-check. */
+  waits(shop: Json): boolean {
+    return shop.status === 'PENDING_VISIT' || Boolean(this.extra.get(shop.id as string)?.rechecking)
   }
 
   /**
@@ -624,7 +632,7 @@ export class MockApi {
       if (!isSuper) return superOnly()
       const shop = this.shops.find((s) => s.id === assignPath[1])
       if (!shop) return fail(404, 'NOT_FOUND', 'No such shop.')
-      if (shop.status !== 'PENDING_VISIT') return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
+      if (!this.waits(shop)) return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
       const agent = this.team.find((m) => m.userId === body?.adminId && m.adminRole === 'ADMIN')
       if (!agent) return fail(400, 'NOT_A_FIELD_AGENT', "That person isn't a field agent on the team.")
       if (this.agentWorksIn.has(`${agent.userId as string}:${shop.id as string}`)) {
@@ -641,7 +649,7 @@ export class MockApi {
       let moved = 0
       let stayed = 0
       for (const s of this.shops) {
-        if (s.status !== 'PENDING_VISIT' || (s.assignedTo as Json | null)?.id !== body.fromAdminId) continue
+        if (!this.waits(s) || (s.assignedTo as Json | null)?.id !== body.fromAdminId) continue
         if (this.agentWorksIn.has(`${agent.userId as string}:${s.id as string}`)) stayed++
         else {
           s.assignedTo = { id: agent.userId, name: agent.name }
@@ -678,7 +686,7 @@ export class MockApi {
       shop.version = (shop.version as number) + 1
       return ok(200, this.view(shop))
     }
-    const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|notes))?$/)
+    const shopPath = p.match(/^\/admin\/shops\/([^/]+)(?:\/(approve|reject|suspend|reinstate|ask-to-fix|notes))?$/)
     if (shopPath) {
       const action = shopPath[2]
       // ShopAdminService: suspending and reinstating are for super admins (checked first), then a field agent sees
@@ -720,14 +728,18 @@ export class MockApi {
         // Order of checks, as the backend: status (409 WRONG_STATUS with the status now), then version (409
         // SHOP_CHANGED), then the text fields (400 VALIDATION_FAILED). A missing version is a malformed request (400).
         if (typeof body.version !== 'number') return invalid({ version: 'is required' })
-        const needsReason = action === 'reject' || action === 'suspend'
+        const needsReason = action === 'reject' || action === 'suspend' || action === 'ask-to-fix'
+        // Approve: a shop waiting for a visit, also a live one waiting for its re-check (it stays APPROVED). Send back:
+        // PENDING_VISIT only. Ask the owner to fix: a live one waiting for its re-check only
         const from: Record<string, Status[]> = {
-          approve: ['PENDING_VISIT'],
+          approve: ['PENDING_VISIT', 'APPROVED'],
           reject: ['PENDING_VISIT'],
+          'ask-to-fix': ['APPROVED'],
           suspend: ['APPROVED', 'PENDING_VISIT'],
           reinstate: ['SUSPENDED'],
         }
-        if (!from[action].includes(shop.status as Status)) {
+        const forWaiting = action === 'approve' || action === 'ask-to-fix'
+        if (!from[action].includes(shop.status as Status) || (forWaiting && !this.waits(shop))) {
           return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
         }
         if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop was changed. Reload and check again.')
@@ -743,12 +755,16 @@ export class MockApi {
           details.checklist = 'has an unknown item'
         }
         if (Object.keys(details).length) return invalid(details)
-        const to: Record<string, Status> = { approve: 'APPROVED', reject: 'DRAFT', suspend: 'SUSPENDED', reinstate: 'PENDING_VISIT' }
-        const event: Record<string, string> = { approve: 'APPROVED', reject: 'SENT_BACK', suspend: 'SUSPENDED', reinstate: 'REINSTATED' }
+        const to: Record<string, Status> = { approve: 'APPROVED', reject: 'DRAFT', suspend: 'SUSPENDED', reinstate: 'PENDING_VISIT', 'ask-to-fix': 'APPROVED' }
+        const event: Record<string, string> = { approve: 'APPROVED', reject: 'SENT_BACK', suspend: 'SUSPENDED', reinstate: 'REINSTATED', 'ask-to-fix': 'FIX_ASKED' }
         shop.status = to[action]
+        // Asked for a fix: still waiting, in the same place in the queue (FIX_ASKED doesn't move statusSince)
+        if (action !== 'ask-to-fix') {
+          x.rechecking = false
+          x.statusSince = new Date().toISOString()
+        }
         shop.statusReason = needsReason ? reason : null
         shop.version = (shop.version as number) + 1
-        x.statusSince = new Date().toISOString()
         if (action === 'approve') {
           x.approvedBefore = true
           x.changes = []
@@ -970,7 +986,7 @@ export class MockApi {
   private pickUpUnassigned(m: Json, pincodes: string[]) {
     if (m.adminRole !== 'ADMIN') return
     for (const s of this.shops) {
-      if (s.status === 'PENDING_VISIT' && !s.assignedTo && pincodes.includes(s.pincode as string)) {
+      if (this.waits(s) && !s.assignedTo && pincodes.includes(s.pincode as string)) {
         const next = this.pick(s, null)
         if (next) s.assignedTo = { id: next.userId, name: next.name }
       }
@@ -983,7 +999,7 @@ export class MockApi {
    */
   private reassignFrom(m: Json, removed: string[] | null = null) {
     for (const s of this.shops) {
-      if (s.status !== 'PENDING_VISIT' || (s.assignedTo as Json | null)?.id !== m.userId) continue
+      if (!this.waits(s) || (s.assignedTo as Json | null)?.id !== m.userId) continue
       if (removed !== null && !removed.includes(s.pincode as string)) continue
       if (m.adminRole === 'ADMIN' && (m.pincodes as string[]).includes(s.pincode as string)) continue
       const next = this.pick(s, m)
@@ -996,7 +1012,7 @@ export class MockApi {
    * the fewest waiting (this business not counted), the longest on the team on a tie.
    */
   private pick(shop: Json, except: Json | null): Json | undefined {
-    const waiting = (a: Json) => this.shops.filter((x) => x !== shop && x.status === 'PENDING_VISIT' && (x.assignedTo as Json | null)?.id === a.userId).length
+    const waiting = (a: Json) => this.shops.filter((x) => x !== shop && this.waits(x) && (x.assignedTo as Json | null)?.id === a.userId).length
     return this.team
       .filter((a) => a !== except && a.adminRole === 'ADMIN' && (a.pincodes as string[]).includes(shop.pincode as string))
       .filter((a) => !this.agentWorksIn.has(`${a.userId as string}:${shop.id as string}`))

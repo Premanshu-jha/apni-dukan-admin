@@ -536,3 +536,53 @@ test('a live salon’s new registration document: listed to check, marked as che
   await expect(page.getByText('Document removed. The owner was told why.')).toBeVisible()
   await expect(doc).toContainText('None added')
 })
+
+test('a live salon waiting for its re-check stays live: approving checks its changes, and it is never listed twice', async ({ page, context, api }) => {
+  const shop = api.addShop(
+    { status: 'APPROVED', type: 'SALON', name: 'Shine Unisex Salon' },
+    {
+      approvedBefore: true,
+      rechecking: true,
+      changes: [{ field: 'gstin', label: 'GSTIN', before: null, after: '27AAPFU0939F1ZV' }],
+    },
+  )
+  await signedIn(context, api)
+  await page.goto('/shops?type=SALON&group=RECHECK')
+  await expect(page.getByText('Shine Unisex Salon')).toBeVisible()
+  await page.goto('/shops?type=SALON&group=LIVE')
+  await expect(page.getByText('Shine Unisex Salon')).toHaveCount(0)
+
+  await page.goto(`/shops/${shop.id as string}`)
+  await expect(page.getByText('Live while you re-check it: customers can book.', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Ask the owner to fix', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send back', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Reassign' })).toBeVisible()
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click()
+  await expect(page.getByText('Checked. The business stays live; the owner is told.')).toBeVisible()
+  expect(shop.status).toBe('APPROVED')
+  expect(api.extra.get(shop.id as string)!.rechecking).toBe(false)
+  // Nothing waits any more: only Suspend
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toBeVisible()
+})
+
+test('a field agent asks the owner to fix a live salon’s re-check: it stays live and waits; it is never sent back', async ({ page, context, api }) => {
+  const shop = api.addShop(
+    { status: 'APPROVED', type: 'SALON', name: 'Shine Unisex Salon', assignedTo: { id: api.user.id, name: api.user.name } },
+    { approvedBefore: true, rechecking: true },
+  )
+  await signedIn(context, api, 'ADMIN')
+  await page.goto(`/shops/${shop.id as string}`)
+  await expect(page.getByRole('button', { name: 'Send back', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Ask the owner to fix', exact: true }).click()
+  await page.getByRole('dialog').getByLabel('Reason for the owner').fill('The GSTIN doesn’t match the certificate.')
+  await page.getByRole('dialog').getByRole('button', { name: 'Ask the owner to fix' }).click()
+  await expect(page.getByText('Sent to the owner. The business stays live and waits here until you approve it.')).toBeVisible()
+  expect(shop.status).toBe('APPROVED')
+  expect(api.extra.get(shop.id as string)!.rechecking).toBe(true)
+  await expect(page.getByRole('list', { name: 'Timeline, newest first' }).getByRole('listitem').first()).toContainText('Asked the owner to fix')
+  // Still waiting: Approve when it is right
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+})
