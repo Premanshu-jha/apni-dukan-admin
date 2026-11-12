@@ -78,7 +78,9 @@ reviews walk the list against the code.
 | Dashboard: Kirana / Salon, six counts | `/?type=SALON` | Admins |
 | Shop list for a type and group, with search, 50 at a time ("Show more shops"); All / Unassigned for waiting groups | `/shops?type=KIRANA&group=FIRST_VISIT&q=&who=UNASSIGNED` | Admins (a field agent: their own only) |
 | Shop page: what changed, photos, details, Navigate, Call owner, timeline, decisions; "Visit by" with Assign / Reassign | `/shops/:id` | Admins (Assign: super admin) |
-| Support: a customer's strikes | `/support` | Super admin |
+| Tickets: mine (Waiting on us / on them / Resolved); super admins: everyone's, Unassigned, by person | `/tickets?view=OPEN&who=` | Support people, super admin |
+| A ticket: who asked (account, business, latest bookings), the conversation, reply / Send & resolve, Close without reply, Give to someone else | `/tickets/:id` | Support people (their own), super admin |
+| Strikes: a customer's strikes | `/support` | Super admin |
 | Team: members (Edit, Move waiting visits, Remove) and Coverage (pincode → agents) | `/team`, `/team?view=coverage` | Super admin |
 | Add or edit a member: phone, email, name, role, designation, pincodes (chips) | `/team/new`, `/team/:id` | Super admin |
 | Test mode | `/test-mode` | Super admin |
@@ -241,6 +243,32 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### 0.10.0 — 2026-11-12
+
+- **Support tickets** (needs backend V46). Questions sent to support@clozest.in or from "Need help" in the customer and
+  partner apps become tickets (CLZ-1001…). A new **Tickets** tab: a support person sees only the tickets given to
+  them; a super admin sees everyone's, **Unassigned** (no support person yet), one person's (tap their name), and a
+  "By person" table (waiting on us, waiting on them, resolved). The tab shows how many wait on you.
+- **A ticket's page** (`src/features/tickets/TicketDetail.tsx`): who asked (the account, their business and latest
+  bookings; an unknown email address says so), the conversation (their attachments stay in the support Gmail), the
+  history, and a reply box: **Send reply** emails them and waits on them, **Send & resolve** also resolves it.
+  What you type is kept in this browser until it is sent (leaving, a reload or a refusal never loses it). If they
+  wrote again meanwhile the reply is refused, their new message shows and your reply stays. **Close without reply**
+  (spam, a mistake) emails nobody; a super admin can **Give to someone else** (or Unassigned, or themselves).
+  Banners say when an email is on its way, when one couldn't be sent, and when they deleted their account.
+- **Support people on the Team page**: the designation **Support** (no pincodes: "Answers only the support tickets
+  given to them"); their card shows open tickets; removing them or changing their designation says their open
+  tickets go to the others. A support person sees only Tickets and More; business addresses take them to their
+  tickets. Field agents keep keying on the FIELD_AGENT designation (assign lists, pincodes, Move waiting visits).
+- The super admins' old **Support** tab (a customer's strikes) is now **Strikes** ("Customer strikes"), so it isn't
+  confused with Tickets.
+- After review: an email whose sender couldn't be proven says so ("confirm who it is"); a message that arrives
+  while you type must be read before Send ("I've read it"); Close without reply sends what you've seen (refused if
+  they wrote since); a ticket moved away while open says "This ticket isn't yours"; refusals and "Sent" show right
+  above the buttons; unsent replies are kept per person and forgotten on sign-out; phones are tap-to-call; switching
+  a field agent to Support warns their pincodes go; "Give to" shows how many each has not resolved.
+- Scenarios 221–266 added in `docs/scenarios.md`.
 
 ### 0.9.0 — 2026-11-12
 

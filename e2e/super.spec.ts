@@ -5,7 +5,7 @@ test('a field agent has no Support, Team or Test mode, and their addresses go to
   await atDashboard(page, context, api, 'ADMIN')
   const nav = page.getByRole('navigation', { name: 'Main' })
   await expect(nav.getByRole('link')).toHaveText(['Businesses', 'More'].map((t) => new RegExp(t)))
-  for (const path of ['/team', '/team/new', '/team/u5', '/test-mode', '/support']) {
+  for (const path of ['/team', '/team/new', '/team/u5', '/test-mode', '/support', '/tickets', '/tickets/t1001']) {
     await page.goto(path)
     await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
     await expect(page).toHaveURL(/\/$/)
@@ -346,7 +346,7 @@ test('the banner follows /admin/me by itself: re-read every minute, and on comin
   await page.clock.install()
   await signedIn(context, api, 'SUPER_ADMIN')
   await page.goto('/support')
-  await expect(page.getByRole('heading', { name: 'Support' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Customer strikes' })).toBeVisible()
   const banner = page.getByRole('alert').filter({ hasText: 'OTP test mode is on until' })
   await expect(banner).toBeHidden()
   // Switched on elsewhere: the minute's re-read shows it, with no reload or click
