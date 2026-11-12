@@ -236,8 +236,10 @@ describe('links, phones and roles', () => {
     expect(roleOf(null)).toBe('NONE')
     expect(roleOf({ id: 'u', phone: null, name: null, email: null, emailVerified: false, admin: true })).toBe('NONE')
     // A field agent: only their visits (Support, Team and Test mode are for super admins)
+    expect(tabsFor('ADMIN', 'FIELD_AGENT').map((t) => t.label)).toEqual(['Businesses', 'More'])
     expect(tabsFor('ADMIN').map((t) => t.label)).toEqual(['Businesses', 'More'])
-    expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Businesses', 'Support', 'Team', 'Test mode', 'More'])
+    expect(tabsFor('ADMIN', 'SUPPORT').map((t) => t.label)).toEqual(['Tickets', 'More'])
+    expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Businesses', 'Tickets', 'Strikes', 'Team', 'Test mode', 'More'])
   })
 })
 

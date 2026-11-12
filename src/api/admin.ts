@@ -16,6 +16,11 @@ import type {
   StrikeLookup,
   TeamMember,
   TestModeState,
+  TicketCounts,
+  TicketDetail,
+  TicketStats,
+  TicketSummary,
+  TicketView,
   TimelineEntry,
   TimelineNext,
   TimelinePage,
@@ -103,6 +108,30 @@ export const adminApi = {
   removeStrike: (appointmentId: string, reason: string) =>
     write<void>('POST', `${A}/salon/strikes/${encodeURIComponent(appointmentId)}/remove`, { reason }),
 
+  /** A page of tickets, newest activity first; `after` is the previous page's last row (null: the first page). */
+  tickets: (view: TicketView, assignee: string | null, after: TicketSummary | null, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ view })
+    if (assignee) params.set('assignee', assignee)
+    if (after) {
+      // Exactly as received: the backend reads the instant back to the microsecond
+      params.set('before', after.lastMessageAt)
+      params.set('beforeId', after.id)
+    }
+    return api<TicketSummary[]>('GET', `${A}/tickets?${params}`, { signal })
+  },
+  ticketCounts: () => api<TicketCounts>('GET', `${A}/tickets/counts`),
+  ticketStats: () => api<TicketStats>('GET', `${A}/tickets/stats`),
+  ticket: (id: string) => api<TicketDetail>('GET', `${A}/tickets/${encodeURIComponent(id)}`),
+  /** Emails the answer to them; `resolve` also resolves the ticket. */
+  replyTicket: (id: string, seenSeq: number, body: string, resolve: boolean) =>
+    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/reply`, { seenSeq, body, resolve }),
+  /** Resolves without emailing anyone. */
+  closeTicket: (id: string, seenSeq: number) =>
+    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/close`, { seenSeq }),
+  /** Super admins: give it to someone else (null = Unassigned). */
+  assignTicket: (id: string, version: number, assigneeId: string | null) =>
+    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/assign`, { version, assigneeId }),
+
   team: () => api<TeamMember[]>('GET', `${A}/team`),
   coverage: () => api<Covered[]>('GET', `${A}/team/coverage`),
   addMember: (member: MemberIn) => write<TeamMember>('POST', `${A}/team`, member),
@@ -138,6 +167,11 @@ export const keys = {
   coverage: ['admin', 'team', 'coverage'] as const,
   testMode: ['admin', 'test-mode'] as const,
   documentsToCheck: ['admin', 'shops', 'documents-to-check'] as const,
+  tickets: ['admin', 'tickets'] as const,
+  ticketList: (view: TicketView, assignee: string | null) => ['admin', 'tickets', 'list', view, assignee] as const,
+  ticketCounts: ['admin', 'tickets', 'counts'] as const,
+  ticketStats: ['admin', 'tickets', 'stats'] as const,
+  ticket: (id: string) => ['admin', 'tickets', 'one', id] as const,
 }
 
 /**
@@ -224,3 +258,34 @@ export function useCoverage() {
 export function useTestMode() {
   return useQuery({ queryKey: keys.testMode, queryFn: adminApi.testMode })
 }
+
+/** Tickets per page from the backend (TicketService.PAGE); a shorter page is the last one. */
+export const TICKETS_PAGE = 50
+
+/** A ticket list, newest activity first, a page at a time; refreshed every 30 seconds while in front. */
+export function useTicketList(view: TicketView, assignee: string | null) {
+  return useInfiniteQuery({
+    queryKey: keys.ticketList(view, assignee),
+    initialPageParam: null as TicketSummary | null,
+    queryFn: ({ pageParam, signal }) => adminApi.tickets(view, assignee, pageParam, signal),
+    getNextPageParam: (last: TicketSummary[]) => (last.length < TICKETS_PAGE ? undefined : last[last.length - 1]),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+    refetchInterval: (query) => ((query.state.data?.pages.length ?? 0) <= REFRESHED_PAGES ? LIST_REFRESH_MS : false),
+  })
+}
+
+/** The menu badge: my tickets waiting on us (and Unassigned for super admins). */
+export function useTicketCounts(enabled: boolean) {
+  return useQuery({ queryKey: keys.ticketCounts, queryFn: adminApi.ticketCounts, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
+}
+
+export function useTicketStats(enabled: boolean) {
+  return useQuery({ queryKey: keys.ticketStats, queryFn: adminApi.ticketStats, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
+}
+
+/** A ticket, re-read every 30 seconds while open, so a new message from them shows up. */
+export function useTicket(id: string) {
+  return useQuery({ queryKey: keys.ticket(id), queryFn: () => adminApi.ticket(id), refetchInterval: LIST_REFRESH_MS })
+}
+
