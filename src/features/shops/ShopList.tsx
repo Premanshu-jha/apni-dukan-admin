@@ -7,7 +7,7 @@ import { explain, fieldError, isNetwork } from '../../api/errors'
 import type { AdminShop } from '../../api/types'
 import { Banner, Button, Card, Chip, EmptyState, ErrorState, Field, Loading, Page, Pill, Spinner } from '../../components/ui'
 import { GROUP_LABELS, isGroup, isShopType, sinceText, TYPE_LABELS } from '../../lib/labels'
-import { searchable } from '../../lib/rules'
+import { searchable, waitingForVisit } from '../../lib/rules'
 import { useDebounced } from '../../lib/useDebounced'
 import { useNow } from '../../lib/useNow'
 
@@ -192,7 +192,10 @@ function ShopCard({ shop, now, index, showAgent }: { shop: AdminShop; now: numbe
       <Card className="flex min-w-0 flex-col gap-1 hover:bg-raised">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-link">#{shop.shopCode}</span>
-          {shop.group === 'RECHECK' && <Pill tone="warn">Re-check</Pill>}
+          <span className="flex gap-1">
+            {shop.addressRequested && <Pill tone="warn">Address change</Pill>}
+            {shop.group === 'RECHECK' && <Pill tone="warn">Re-check</Pill>}
+          </span>
         </div>
         <p className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{shop.name}</p>
         <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
@@ -205,7 +208,7 @@ function ShopCard({ shop, now, index, showAgent }: { shop: AdminShop; now: numbe
           <p className="min-w-0 text-sm [overflow-wrap:anywhere]">
             {shop.assignedTo ? (
               <span className="text-muted">Visit by {shop.assignedTo.name || 'a field agent'}</span>
-            ) : shop.status === 'PENDING_VISIT' ? (
+            ) : waitingForVisit(shop) ? (
               <span className="text-warn">Unassigned: no field agent can take {shop.pincode}</span>
             ) : null}
           </p>

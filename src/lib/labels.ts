@@ -17,7 +17,7 @@ export const GROUP_LABELS: Record<ShopGroup, string> = {
 }
 
 /**
- * How long a shop has been in its group, for its card: "Waiting 3 days", "Sent back 2 h ago", "Live for 5 days".
+ * How long a shop has been in its group, for its card: "Waiting 3 days", "Sent back 2 h ago", "Last checked 5 days ago".
  * `since` is the shop's statusSince: when it entered its current status.
  */
 export function sinceText(group: ShopGroup | null, since: string, now: number = Date.now()): string {
@@ -30,7 +30,8 @@ export function sinceText(group: ShopGroup | null, since: string, now: number = 
     case 'SENT_BACK':
       return fresh ? 'Sent back just now' : `Sent back ${d} ago`
     case 'LIVE':
-      return fresh ? 'Live since just now' : `Live for ${d}`
+      // statusSince is the last approval: the first one, or the last re-check approved (the shop was live meanwhile)
+      return fresh ? 'Checked just now' : `Last checked ${d} ago`
     case 'SUSPENDED':
       return fresh ? 'Suspended just now' : `Suspended for ${d}`
     case 'CLOSED':
@@ -105,6 +106,8 @@ export function eventLabel(e: Pick<TimelineEntry, 'event' | 'byName' | 'byAdmin'
       return `Note${by}`
     case 'CLOSED':
       return e.byName ? `Closed by ${e.byName} (the owner)` : 'Closed by the owner'
+    case 'FIX_ASKED':
+      return `Asked the owner to fix${by}`
     case 'HANDED_OVER':
       return e.byName ? `Handed over to ${e.byName}` : 'Handed over to a new owner'
     default:

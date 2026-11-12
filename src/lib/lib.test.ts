@@ -15,6 +15,8 @@ import {
   checkTestEmail,
   checkTestPhone,
   decisionsFor,
+  liveRecheck,
+  waitingForVisit,
   needsReason,
   optional,
   reasonFromChecklist,
@@ -71,7 +73,7 @@ describe('groups and labels', () => {
     expect(sinceText('FIRST_VISIT', threeDays, NOW)).toBe('Waiting 3 days')
     expect(sinceText('RECHECK', new Date(NOW - 5 * 3600_000).toISOString(), NOW)).toBe('Waiting 5 h')
     expect(sinceText('SENT_BACK', new Date(NOW - 20 * 60_000).toISOString(), NOW)).toBe('Sent back 20 min ago')
-    expect(sinceText('LIVE', new Date(NOW - 86400_000).toISOString(), NOW)).toBe('Live for 1 day')
+    expect(sinceText('LIVE', new Date(NOW - 86400_000).toISOString(), NOW)).toBe('Last checked 1 day ago')
     expect(sinceText('SUSPENDED', new Date(NOW).toISOString(), NOW)).toBe('Suspended just now')
     expect(sinceText('CLOSED', threeDays, NOW)).toBe('Closed 3 days ago')
     expect(sinceText(null, threeDays, NOW)).toBe('For 3 days')
@@ -115,6 +117,18 @@ describe('decisions and form checks', () => {
     expect(decisionsFor('APPROVED')).toEqual(['suspend'])
     expect(decisionsFor('SUSPENDED')).toEqual(['reinstate'])
     expect(decisionsFor('DRAFT')).toEqual([])
+    // A live shop waiting for its re-check: approve (checked) or ask the owner to fix it; never sent back
+    expect(decisionsFor('APPROVED', true, true)).toEqual(['approve', 'ask-to-fix', 'suspend'])
+    expect(decisionsFor('APPROVED', false, true)).toEqual(['approve', 'ask-to-fix'])
+    expect(decisionsFor('PENDING_VISIT', false)).toEqual(['approve', 'reject'])
+    expect(needsReason('ask-to-fix')).toBe(true)
+    expect(decisionsFor('APPROVED', false, false)).toEqual([])
+    expect(waitingForVisit({ status: 'APPROVED', waitingForVisit: true })).toBe(true)
+    expect(liveRecheck({ status: 'APPROVED', waitingForVisit: true })).toBe(true)
+    expect(liveRecheck({ status: 'PENDING_VISIT', waitingForVisit: true })).toBe(false)
+    // An older backend without the field: only PENDING_VISIT waits
+    expect(waitingForVisit({ status: 'PENDING_VISIT' })).toBe(true)
+    expect(waitingForVisit({ status: 'APPROVED' })).toBe(false)
     expect(needsReason('reject') && needsReason('suspend')).toBe(true)
     expect(needsReason('approve') || needsReason('reinstate')).toBe(false)
   })
