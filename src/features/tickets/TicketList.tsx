@@ -1,9 +1,11 @@
-import { Link, useSearchParams } from 'react-router'
-import { useTicketList, useTicketStats } from '../../api/admin'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useSearchParams } from 'react-router'
+import { useTicketList, useTicketSearch, useTicketStats } from '../../api/admin'
 import { explain, isNetwork } from '../../api/errors'
 import type { TicketSummary, TicketView } from '../../api/types'
 import { useAdmin } from '../../app/guards'
-import { Banner, Button, Card, Chip, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
+import { Banner, Button, Card, Chip, EmptyState, ErrorState, Field, Loading, Page, Pill } from '../../components/ui'
+import { useDebounced } from '../../lib/useDebounced'
 import { isSuperAdmin } from '../../lib/roles'
 import { howLong } from '../../lib/time'
 import { useNow } from '../../lib/useNow'
@@ -14,7 +16,9 @@ const VIEWS: TicketView[] = ['OPEN', 'WAITING', 'RESOLVED']
 /**
  * /tickets: a support person's own tickets (waiting on us first, then waiting on them, then resolved). A super
  * admin sees everyone's, can show Unassigned or one person's (?who=), and the counts per person on top.
- * The view and the person are in the address, so Back from a ticket comes back to the same list.
+ * The view, the person and the search are in the address, so Back from a ticket comes back to the same list. A
+ * search box finds a ticket by its number, a mobile number or an email (?q=); ?requester= lists one person's tickets
+ * ("N other tickets from them"; a support person sees only their own).
  */
 export function TicketList() {
   const me = useAdmin()
@@ -28,6 +32,36 @@ export function TicketList() {
   const now = useNow(60_000)
   const rows = list.data?.pages.flat() ?? []
   const whoName = who ? stats.data?.people.find((p) => p.userId === who)?.name ?? 'One person' : null
+  const requester = params.get('requester')
+  const [text, setText] = useState(params.get('q') ?? '')
+  const typed = useDebounced(text.trim(), 400)
+  // Only what the backend can find: a ticket number, a full mobile number, an email (not a half-typed number or a name)
+  const findable = isFindable(typed)
+  const q = findable ? typed : ''
+  const searching = q.length > 0 || requester !== null
+  const found = useTicketSearch(q, requester)
+
+  // The search is in the address (replacing it): Back from a ticket comes back to the same results. Only a change of
+  // what was typed writes it; the address changing by itself (the Tickets tab, a link) empties or fills the box.
+  const written = useRef(params.get('q') ?? '')
+  const inAddress = params.get('q') ?? ''
+  useEffect(() => {
+    if (typed === written.current) return
+    written.current = typed
+    setParams((now) => {
+      const p = new URLSearchParams(now)
+      if (typed) {
+        p.set('q', typed)
+        p.delete('requester')   // a new search leaves "one person's tickets"
+      } else p.delete('q')
+      return p
+    }, { replace: true })
+  }, [typed, setParams])
+  useEffect(() => {
+    if (inAddress === written.current) return
+    written.current = inAddress
+    setText(inAddress)
+  }, [inAddress])
 
   function go(next: { view?: TicketView; who?: string | null }) {
     const p = new URLSearchParams(params)
@@ -41,6 +75,56 @@ export function TicketList() {
 
   return (
     <Page title={superAdmin ? 'Support tickets' : 'My tickets'}>
+      <form role="search" onSubmit={(e) => e.preventDefault()}>
+        <Field
+          id="ticket-search"
+          label="Find a ticket"
+          placeholder="CLZ-1042, a mobile number or an email"
+          autoComplete="off"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        {typed && !findable && (
+          <p className="pt-1 text-sm text-muted">
+            Type a ticket number (CLZ-1042), a full 10-digit mobile number or an email. Names can't be searched.
+          </p>
+        )}
+      </form>
+      {searching ? (
+        <section aria-label="Search results" className="flex flex-col gap-2">
+          {requester && (
+            <p className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="[overflow-wrap:anywhere]">
+                Every ticket from {found.data?.[0]?.requester ?? 'this person'}
+                {superAdmin ? '' : ' that is yours'}.
+              </span>
+              <button type="button" className="min-h-9 text-link underline" onClick={() => {
+                const p = new URLSearchParams(params)
+                p.delete('requester')
+                setParams(p, { replace: true })
+              }}>
+                Back to the list
+              </button>
+            </p>
+          )}
+          {found.isPending ? (
+            <Loading />
+          ) : found.isError && !found.data ? (
+            <Banner tone="bad">{explain(found.error)}</Banner>
+          ) : (found.data ?? []).length === 0 ? (
+            <EmptyState title="No tickets found" body={superAdmin ? 'Check the number, mobile or email.' : 'Only your own tickets are searched.'} />
+          ) : (
+            <ul className={`flex flex-col gap-2 ${found.isPlaceholderData ? 'opacity-50' : ''}`}>
+              {found.data!.map((t) => (
+                <li key={t.id}>
+                  <Row t={t} now={now} showAssignee={superAdmin} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : (
+      <>
       {superAdmin && stats.data && (
         <Card className="flex flex-col gap-2">
           <h2 className="font-semibold">By person</h2>
@@ -126,13 +210,25 @@ export function TicketList() {
           )}
         </>
       )}
+      </>
+      )}
     </Page>
   )
 }
 
+/** What the search can find: a ticket number (4+ digits, or "CLZ" and digits), a full mobile number, an email. */
+export function isFindable(text: string): boolean {
+  if (text.includes('@')) return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text)
+  if (/clz\s*-?\s*\d/i.test(text)) return true
+  const digits = text.replace(/\D/g, '')
+  if (/^[\d\s+()-]+$/.test(text)) return /^\d{4,9}$/.test(text.trim()) || digits.length >= 10
+  return false
+}
+
 function Row({ t, now, showAssignee }: { t: TicketSummary; now: number; showAssignee: boolean }) {
+  const location = useLocation()
   return (
-    <Link to={`/tickets/${t.id}`} className="flex flex-col gap-1 rounded-2xl border border-line bg-surface p-4 hover:bg-raised">
+    <Link to={`/tickets/${t.id}`} state={{ back: location.pathname + location.search }} className="flex flex-col gap-1 rounded-2xl border border-line bg-surface p-4 hover:bg-raised">
       <span className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-semibold tabular-nums">{t.number}</span>
         <Pill tone={STATUS_TONES[t.status]}>{STATUS_LABELS[t.status]}</Pill>
