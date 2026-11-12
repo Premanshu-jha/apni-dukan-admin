@@ -13,7 +13,9 @@ import { Support } from '../features/support/Support'
 import { AddMember, EditMember } from '../features/team/MemberForm'
 import { Team } from '../features/team/Team'
 import { TestMode } from '../features/testmode/TestMode'
-import { AdminGate, FinishingProfile, SignedIn, SignedOutOnly, SuperAdminOnly } from './guards'
+import { TicketDetail } from '../features/tickets/TicketDetail'
+import { TicketList } from '../features/tickets/TicketList'
+import { AdminGate, FieldTeamOnly, FinishingProfile, SignedIn, SignedOutOnly, SuperAdminOnly, TicketsOnly } from './guards'
 import { Bare, Shell } from './Shell'
 
 export function App() {
@@ -34,9 +36,15 @@ export function App() {
       <Route element={<SignedIn />}>
         <Route element={<AdminGate />}>
           <Route element={<Shell />}>
-            <Route index element={<Dashboard />} />
-            <Route path="/shops" element={<ShopList />} />
-            <Route path="/shops/:id" element={<ShopDetail />} />
+            <Route element={<FieldTeamOnly />}>
+              <Route index element={<Dashboard />} />
+              <Route path="/shops" element={<ShopList />} />
+              <Route path="/shops/:id" element={<ShopDetail />} />
+            </Route>
+            <Route element={<TicketsOnly />}>
+              <Route path="/tickets" element={<TicketList />} />
+              <Route path="/tickets/:id" element={<TicketDetail />} />
+            </Route>
             <Route path="/more" element={<More />} />
             <Route element={<SuperAdminOnly />}>
               <Route path="/support" element={<Support />} />

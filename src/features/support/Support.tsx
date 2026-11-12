@@ -37,7 +37,7 @@ export function Support() {
   }
 
   return (
-    <Page title="Support">
+    <Page title="Customer strikes">
       <form
         className="flex flex-col gap-3"
         noValidate
