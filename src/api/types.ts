@@ -94,6 +94,27 @@ export interface AdminShop {
    * backend: there, only PENDING_VISIT waits.
    */
   waitingForVisit?: boolean
+  /** The owner asked for a new address and it waits for the field team (Approve applies it). */
+  addressRequested?: boolean
+}
+
+/** A new address and pin, as the owner asks for it or the field team sets it. */
+export interface AddressIn {
+  addressLine: string
+  area: string
+  city: string
+  pincode: string
+  latitude: number
+  longitude: number
+}
+
+/** The owner's address change request waiting for the field team (GET /admin/shops/{id} `addressRequest`). */
+export interface AddressRequest extends AddressIn {
+  id: string
+  status: 'PENDING' | 'APPROVED' | 'DECLINED' | 'CANCELLED'
+  reason: string | null
+  createdAt: string
+  decidedAt: string | null
 }
 
 export interface Assignee {
@@ -214,6 +235,8 @@ export interface ShopDetail {
   previousShopPhotoUrl: string | null
   /** The salon video the owner recorded at registration (a signed link, valid at least 15 more minutes); null if none. */
   videoUrl?: string | null
+  /** The owner's address change request waiting for the field team; null if none (missing from an older backend). */
+  addressRequest?: AddressRequest | null
   /** Newest first, the first 50 entries. */
   timeline: TimelineEntry[]
   /** Where the next 50 start (GET /admin/shops/{id}/timeline with these); null when there are no more. */
