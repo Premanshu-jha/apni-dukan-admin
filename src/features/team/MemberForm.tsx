@@ -126,14 +126,16 @@ function MemberForm({ member, onLoadLatest }: { member: TeamMember | null; onLoa
 
   const normalized = normalizePhone(phone)
   const admin = role === 'ADMIN'
+  // Only a field agent covers pincodes; a support person answers tickets and has none
+  const agent = admin && designation === 'FIELD_AGENT'
   // A complete pincode still in the box counts as added; a half-typed one must be finished or cleared
-  const pending = admin && isPincode(draft) && !pincodes.includes(draft) ? [draft] : []
+  const pending = agent && isPincode(draft) && !pincodes.includes(draft) ? [draft] : []
   const allPincodes = [...pincodes, ...pending]
   const local = {
     name: name.trim().length < 2 ? 'Enter their name (at least 2 letters).' : undefined,
     phone: normalized ? undefined : 'Enter a 10-digit mobile number.',
     email: looksLikeEmail(email) ? undefined : 'Enter an email address, like name@gmail.com',
-    pincodes: !admin
+    pincodes: !agent
       ? undefined
       : draft !== '' && !isPincode(draft)
         ? `Finish the pincode "${draft}" (6 digits) and tap Add, or clear it.`
@@ -161,7 +163,7 @@ function MemberForm({ member, onLoadLatest }: { member: TeamMember | null; onLoa
       name: name.trim(),
       role,
       designation: admin ? designation : null,
-      pincodes: admin ? allPincodes : [],
+      pincodes: agent ? allPincodes : [],
     }
     try {
       const saved = member ? await adminApi.editMember(member.userId, baseVersion, body) : await adminApi.addMember(body)
@@ -214,7 +216,7 @@ function MemberForm({ member, onLoadLatest }: { member: TeamMember | null; onLoa
   const detailKeys = error instanceof ApiError && error.code === 'VALIDATION_FAILED' ? Object.keys(error.details) : []
   const onFields =
     Boolean(codeFor(error, PHONE_CODES) || codeFor(error, EMAIL_CODES)) ||
-    (detailKeys.length > 0 && detailKeys.every((k) => FIELDS_WITH_A_PLACE.includes(k) && (k !== 'pincodes' || admin)))
+    (detailKeys.length > 0 && detailKeys.every((k) => FIELDS_WITH_A_PLACE.includes(k) && (k !== 'pincodes' || agent)))
 
   return (
     <Page title={member ? `Edit ${member.name || 'member'}` : 'Add a member'} back="/team">
@@ -272,7 +274,11 @@ function MemberForm({ member, onLoadLatest }: { member: TeamMember | null; onLoa
             ))}
           </div>
           <p className="text-sm text-muted">
-            {admin ? 'Visits and decides only the businesses assigned to them.' : 'Sees everything and runs the team, assignments, support and test mode.'}
+            {!admin
+              ? 'Sees everything and runs the team, assignments, support tickets and test mode.'
+              : agent
+                ? 'Visits and decides only the businesses assigned to them.'
+                : 'Answers only the support tickets given to them. Sees no businesses.'}
           </p>
         </fieldset>
         {admin && (
@@ -287,6 +293,7 @@ function MemberForm({ member, onLoadLatest }: { member: TeamMember | null; onLoa
                 ))}
               </div>
             </fieldset>
+            {agent && (
             <PincodeInput
               id="member-pincodes"
               value={pincodes}
@@ -296,12 +303,23 @@ function MemberForm({ member, onLoadLatest }: { member: TeamMember | null; onLoa
               coveredBy={coveredBy}
               error={pincodeErr}
             />
+            )}
           </>
         )}
-        {member && member.adminRole === 'ADMIN' && !admin && member.pendingVisits > 0 && (
+        {member && member.designation === 'FIELD_AGENT' && !agent && member.pendingVisits > 0 && (
           <Banner tone="warn">
             Their {member.pendingVisits} waiting {member.pendingVisits === 1 ? 'visit goes' : 'visits go'} to other field agents covering those pincodes, or
             to Unassigned.
+          </Banner>
+        )}
+        {member && member.designation === 'FIELD_AGENT' && admin && designation === 'SUPPORT' && member.pincodes.length > 0 && (
+          <Banner tone="warn">
+            A support person covers no pincodes: their {member.pincodes.length} {member.pincodes.length === 1 ? 'pincode is' : 'pincodes are'} removed when you save.
+          </Banner>
+        )}
+        {member && member.designation === 'SUPPORT' && !(admin && designation === 'SUPPORT') && member.openTickets > 0 && (
+          <Banner tone="warn">
+            Their {member.openTickets} open {member.openTickets === 1 ? 'ticket goes' : 'tickets go'} to the other support people, or to Unassigned.
           </Banner>
         )}
         <Button type="submit" busy={busy}>
