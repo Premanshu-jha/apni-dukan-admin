@@ -7,7 +7,7 @@ import { explain, fieldError, isNetwork } from '../../api/errors'
 import type { AdminShop } from '../../api/types'
 import { Banner, Button, Card, Chip, EmptyState, ErrorState, Field, Loading, Page, Pill, Spinner } from '../../components/ui'
 import { GROUP_LABELS, isGroup, isShopType, sinceText, TYPE_LABELS } from '../../lib/labels'
-import { searchable } from '../../lib/rules'
+import { searchable, waitingForVisit } from '../../lib/rules'
 import { useDebounced } from '../../lib/useDebounced'
 import { useNow } from '../../lib/useNow'
 
@@ -205,7 +205,7 @@ function ShopCard({ shop, now, index, showAgent }: { shop: AdminShop; now: numbe
           <p className="min-w-0 text-sm [overflow-wrap:anywhere]">
             {shop.assignedTo ? (
               <span className="text-muted">Visit by {shop.assignedTo.name || 'a field agent'}</span>
-            ) : shop.status === 'PENDING_VISIT' ? (
+            ) : waitingForVisit(shop) ? (
               <span className="text-warn">Unassigned: no field agent can take {shop.pincode}</span>
             ) : null}
           </p>

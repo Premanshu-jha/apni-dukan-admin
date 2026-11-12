@@ -37,6 +37,7 @@ const CONFIRM_TEXT: Record<Decision, string> = {
   reinstate: 'The business comes back for a visit: it waits in "Re-check after edit" until someone approves it.',
   reject: 'The owner gets it back to fix, with your reason.',
   suspend: 'The business disappears for customers. The owner sees your reason.',
+  'ask-to-fix': 'The business stays live and waits here. The owner sees your reason and fixes it in the app.',
 }
 
 /**
@@ -149,7 +150,7 @@ export function DecisionSheet({
           </Button>
           <Button
             type="submit"
-            variant={decision === 'approve' || decision === 'reinstate' ? 'primary' : 'danger'}
+            variant={decision === 'approve' || decision === 'reinstate' || decision === 'ask-to-fix' ? 'primary' : 'danger'}
             className="flex-1"
             busy={busy}
           >

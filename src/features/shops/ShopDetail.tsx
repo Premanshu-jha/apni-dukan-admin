@@ -21,7 +21,7 @@ import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } fro
 import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
 import { directionsUrl, distanceLabel, telUrl } from '../../lib/links'
 import { formatPhone } from '../../lib/phone'
-import { DECISION_LABELS, decisionsFor, type Decision } from '../../lib/rules'
+import { clean, DECISION_LABELS, decisionsFor, liveRecheck, waitingForVisit, type Decision } from '../../lib/rules'
 import { dateIst, dateTimeIst } from '../../lib/time'
 import { clock12, rupees } from '../../lib/salon'
 import { type Conflict, DecisionSheet, type Draft, EMPTY_DRAFT, NoteSheet } from './DecisionSheet'
@@ -32,13 +32,18 @@ const RESULT: Record<Decision, ShopStatus> = {
   reject: 'DRAFT',
   suspend: 'SUSPENDED',
   reinstate: 'PENDING_VISIT',
+  'ask-to-fix': 'APPROVED',
 }
+
+/** Approving a live shop's re-check: it was live all along. */
+const RECHECKED_TEXT = 'Checked. The business stays live; the owner is told.'
 
 const DONE_TEXT: Record<Decision, string> = {
   approve: 'Approved. The business is live now.',
   reject: 'Sent back to the owner with your reason.',
   suspend: 'Suspended. The owner sees your reason.',
   reinstate: 'Reinstated. It now waits for a re-check visit.',
+  'ask-to-fix': 'Sent to the owner. The business stays live and waits here until you approve it.',
 }
 
 /** One shop for the field visit: what changed, photos, details, directions, call, decisions and the timeline. */
@@ -96,13 +101,13 @@ export function ShopDetail() {
     return true
   }
 
-  function decided(decision: Decision, updated: AdminShop) {
+  function decided(decision: Decision, updated: AdminShop, wasLive = false) {
     qc.setQueryData<Detail>(keys.shop(id), (old) => (old ? { ...old, shop: updated } : old))
     setDrafts((d) => ({ ...d, [decision]: undefined }))
     setOpen(null)
     setStale(null)
     setWarning(null)
-    setNotice(DONE_TEXT[decision])
+    setNotice(decision === 'approve' && wasLive ? RECHECKED_TEXT : DONE_TEXT[decision])
     refreshAll()
   }
 
@@ -133,16 +138,20 @@ export function ShopDetail() {
   async function uncertain(decision: Decision): Promise<boolean> {
     try {
       const now = await adminApi.shop(id)
-      if (now.shop.status !== RESULT[decision]) return false
+      // A live re-check stays APPROVED: approved only once nothing waits any more
+      if (now.shop.status !== RESULT[decision] || (decision === 'approve' && waitingForVisit(now.shop))) return false
+      // Asked for a fix: still waiting, with this reason for the owner (an earlier ask's reason isn't proof)
+      if (decision === 'ask-to-fix' && !(waitingForVisit(now.shop) && now.shop.statusReason === clean(drafts['ask-to-fix']?.reason ?? ''))) return false
       qc.setQueryData<Detail>(keys.shop(id), now)
-      decided(decision, now.shop)
+      decided(decision, now.shop, liveRecheck(shop))
       return true
     } catch {
       return false
     }
   }
 
-  const decisions = decisionsFor(shop.status, superAdmin)
+  const waiting = waitingForVisit(shop)
+  const decisions = decisionsFor(shop.status, superAdmin, waiting)
   const current = open !== null && open !== 'note' && open !== 'assign' ? open : null
 
   return (
@@ -154,7 +163,7 @@ export function ShopDetail() {
           {decisions.map((d) => (
             <Button
               key={d}
-              variant={d === 'approve' || d === 'reinstate' ? 'primary' : d === 'reject' ? 'secondary' : 'danger'}
+              variant={d === 'approve' || d === 'reinstate' ? 'primary' : d === 'reject' || d === 'ask-to-fix' ? 'secondary' : 'danger'}
               className="flex-1"
               disabled={stale !== null}
               onClick={() => {
@@ -197,18 +206,24 @@ export function ShopDetail() {
               <>
                 Visit by <span className="font-semibold">{shop.assignedTo.name || 'a field agent with no name yet'}</span>
               </>
-            ) : shop.status === 'PENDING_VISIT' ? (
+            ) : waiting ? (
               <span className="text-warn">Unassigned: no field agent can take {shop.pincode}</span>
             ) : (
               <span className="text-muted">No field agent</span>
             )}
           </p>
-          {shop.status === 'PENDING_VISIT' && (
+          {waiting && (
             <Button variant="secondary" className="shrink-0 text-sm" disabled={stale !== null} onClick={() => setOpen('assign')}>
               {shop.assignedTo ? 'Reassign' : 'Assign'}
             </Button>
           )}
         </div>
+      )}
+      {liveRecheck(shop) && (
+        <Banner tone="info">
+          Live while you re-check it: customers can book. Approve when the changes below are right, or ask the owner to
+          fix something (it stays live and waits here).{superAdmin ? ' Suspend only for something serious.' : ''}
+        </Banner>
       )}
       {shop.statusReason && (
         <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
@@ -293,7 +308,7 @@ export function ShopDetail() {
           draft={drafts[current.decision] ?? EMPTY_DRAFT}
           onDraft={(d) => setDrafts((all) => ({ ...all, [current.decision]: d }))}
           onClose={() => setOpen(null)}
-          onDone={(s) => decided(current.decision, s)}
+          onDone={(s) => decided(current.decision, s, liveRecheck(shop))}
           onConflict={(c, e) => void conflicted(c, e)}
           onUncertain={() => uncertain(current.decision)}
         />
