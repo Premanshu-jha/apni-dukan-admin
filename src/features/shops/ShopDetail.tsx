@@ -5,6 +5,7 @@ import { adminApi, keys, useEarlierTimeline, useShopDetail } from '../../api/adm
 import { useAdmin } from '../../app/guards'
 import { isSuperAdmin } from '../../lib/roles'
 import { AssignSheet } from './AssignSheet'
+import { AddressRequestCard, ChangeAddress } from './AddressSection'
 import { ADMIN_MESSAGES, explain, isApiError, isNetwork, wrongStatusText } from '../../api/errors'
 import type {
   AdminShop,
@@ -150,7 +151,28 @@ export function ShopDetail() {
     }
   }
 
+  /** The address request was declined, or the address changed here: the page, lists and counts read again. */
+  function addressDone(updated: AdminShop, text: string) {
+    // The request was answered either way: its card and the Approve sheet's words about it go at once
+    qc.setQueryData<Detail>(keys.shop(id), (old) => (old ? { ...old, shop: updated, addressRequest: null } : old))
+    setStale(null)
+    setWarning(null)
+    setNotice(text)
+    refreshAll()
+  }
+
+  function addressConflict(e: unknown) {
+    if (isApiError(e, 'NO_ADDRESS_REQUEST')) {
+      setNotice(null)
+      setStale({ text: 'The owner took the request back, or someone decided on it meanwhile. Reload to see it as it is.', reloadError: null })
+      void qc.invalidateQueries({ queryKey: keys.shop(id) })
+      return
+    }
+    void conflicted(isApiError(e, 'SHOP_CHANGED') ? 'SHOP_CHANGED' : 'WRONG_STATUS', e)
+  }
+
   const waiting = waitingForVisit(shop)
+  const canChange = stale === null && shop.status !== 'CLOSED'
   const decisions = decisionsFor(shop.status, superAdmin, waiting)
   const current = open !== null && open !== 'note' && open !== 'assign' ? open : null
 
@@ -231,6 +253,17 @@ export function ShopDetail() {
         </p>
       )}
 
+      {data.addressRequest && (
+        <AddressRequestCard
+          shop={shop}
+          request={data.addressRequest}
+          waiting={waiting}
+          canAct={canChange}
+          onDone={addressDone}
+          onConflict={addressConflict}
+        />
+      )}
+
       {data.changes.length > 0 && <WhatChanged detail={data} />}
 
       <section aria-labelledby="photos" className="flex flex-col gap-2">
@@ -294,6 +327,7 @@ export function ShopDetail() {
             {data.salon && data.salon.serviceList === undefined && <Row label="Services">{String(data.salon.services)}</Row>}
           </dl>
         </Card>
+        <ChangeAddress shop={shop} request={data.addressRequest ?? null} canAct={canChange} onDone={addressDone} onConflict={addressConflict} />
       </section>
 
       {data.salon && <SalonSetup facts={data.salon} />}
@@ -306,6 +340,11 @@ export function ShopDetail() {
           decision={current.decision}
           version={current.version}
           draft={drafts[current.decision] ?? EMPTY_DRAFT}
+          extra={
+            current.decision === 'approve' && data.addressRequest
+              ? `The owner's new address (${data.addressRequest.addressLine}, ${data.addressRequest.area}) becomes the business's address and the owner is told. To approve the rest without it, decline it first.`
+              : undefined
+          }
           onDraft={(d) => setDrafts((all) => ({ ...all, [current.decision]: d }))}
           onClose={() => setOpen(null)}
           onDone={(s) => decided(current.decision, s, liveRecheck(shop))}

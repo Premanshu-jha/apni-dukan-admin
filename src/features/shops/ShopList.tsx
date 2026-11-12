@@ -192,7 +192,10 @@ function ShopCard({ shop, now, index, showAgent }: { shop: AdminShop; now: numbe
       <Card className="flex min-w-0 flex-col gap-1 hover:bg-raised">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-link">#{shop.shopCode}</span>
-          {shop.group === 'RECHECK' && <Pill tone="warn">Re-check</Pill>}
+          <span className="flex gap-1">
+            {shop.addressRequested && <Pill tone="warn">Address change</Pill>}
+            {shop.group === 'RECHECK' && <Pill tone="warn">Re-check</Pill>}
+          </span>
         </div>
         <p className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{shop.name}</p>
         <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
