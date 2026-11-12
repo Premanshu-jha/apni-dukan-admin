@@ -242,6 +242,18 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.9.0 — 2026-11-12
+
+- **A live business's re-check while it stays live** (needs backend V41). A business whose owner changed a photo, the
+  video, the GSTIN or the Udyam number now stays live and waits in "Re-check after edit". The decisions, Assign and
+  "Unassigned" follow `waitingForVisit` (`src/lib/rules.ts`: `waitingForVisit`, `liveRecheck`) instead of the status
+  alone. For a live re-check the choices are **Approve** ("Checked. The business stays live…") and **Ask the owner to
+  fix** (`POST …/ask-to-fix`: it stays live and waits, the owner sees your reason; timeline "Asked the owner to fix");
+  Send back is only for a first visit (it would take a working salon off the app). A lost answer counts as done only
+  when the re-read shows it. With an older backend (no `waitingForVisit`) only PENDING_VISIT waits, as before.
+- The Live list says "Last checked … ago" (its time is the last approval, also a re-check's).
+- Scenarios 119, 156 updated, 201–207 added in `docs/scenarios.md`.
+
 ### 0.8.0 — 2026-11-11
 
 - **New look from the Clozest logo.** The theme's colours (`src/index.css`) now come from the dark logo: background
