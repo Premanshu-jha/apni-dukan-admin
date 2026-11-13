@@ -393,6 +393,20 @@ export interface TicketMessage {
   /** False for an email whose sender we couldn't prove (it may not be from them). */
   senderVerified: boolean
   at: string
+  /** Photos, videos and PDFs sent with it in the apps or with a reply. Missing from a backend before round 4a. */
+  files?: MessageFile[]
+}
+
+/** A photo, video or PDF on a ticket message. */
+export interface MessageFile {
+  id: string
+  contentType: string
+  sizeBytes: number
+  name: string | null
+  /** Opens it for at least 15 minutes; null once removed */
+  url: string | null
+  /** Deleted (6 months after the ticket was resolved, or the person deleted their account) */
+  removed: boolean
 }
 
 export interface TicketEvent {
