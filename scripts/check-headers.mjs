@@ -3,6 +3,7 @@
 // key, starts Caddy, then runs: node scripts/check-headers.mjs http://localhost:8080
 const base = process.argv[2] ?? 'http://localhost:8080'
 const API = 'https://api.example.com'
+const R2 = 'https://*.r2.cloudflarestorage.com'
 const TURNSTILE = 'https://challenges.cloudflare.com'
 // What this app may use (Permissions-Policy)
 const ALLOWED = []
@@ -23,9 +24,10 @@ async function headersOf(path) {
   check(directive('default-src') === "default-src 'self'", `${path}: default-src is "${directive('default-src')}"`)
   check(directive('frame-ancestors') === "frame-ancestors 'none'", `${path}: frame-ancestors is "${directive('frame-ancestors')}"`)
   check(directive('script-src') === `script-src 'self' ${TURNSTILE}`, `${path}: script-src is "${directive('script-src')}"`)
-  check(directive('connect-src') === `connect-src 'self' ${API}`, `${path}: connect-src is "${directive('connect-src')}"`)
-  // The salon video plays from its signed R2 link (the build sets no PHOTO_ORIGIN: any R2 address)
-  check(directive('media-src') === "media-src 'self' https://*.r2.cloudflarestorage.com", `${path}: media-src is "${directive('media-src')}"`)
+  // The backend, and R2 for a support file's video upload (the build sets no PHOTO_ORIGIN: any R2 address)
+  check(directive('connect-src') === `connect-src 'self' ${API} ${R2}`, `${path}: connect-src is "${directive('connect-src')}"`)
+  // Videos (the salon's, a ticket's) play from their signed R2 link; blob: previews a video before it is sent
+  check(directive('media-src') === `media-src 'self' blob: ${R2}`, `${path}: media-src is "${directive('media-src')}"`)
   check(directive('object-src') === "object-src 'none'", `${path}: object-src is "${directive('object-src')}"`)
   check(directive('worker-src') === "worker-src 'self'", `${path}: worker-src is "${directive('worker-src')}"`)
   check(!csp.includes('unsafe-eval'), `${path}: CSP allows eval`)

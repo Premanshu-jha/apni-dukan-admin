@@ -7,6 +7,7 @@
  * - its own scripts, styles, icons and service worker ('self');
  * - the backend (VITE_API_URL): every API call;
  * - Cloudflare Turnstile (only when VITE_TURNSTILE_SITE_KEY is set): its script and its frame;
+ * - support files: a video sent straight to R2 with a one-time link (connect-src);
  * - shop and owner photos, and the salon video (media-src): signed links to Cloudflare R2 (PHOTO_ORIGIN, default any *.r2.cloudflarestorage.com
  *   address).
  * Styles allow 'unsafe-inline': the Turnstile widget sets inline styles. Scripts never run inline.
@@ -37,9 +38,9 @@ export function securityHeaders(env: HeaderSettings): Record<string, string> {
     "default-src 'self'",
     `script-src 'self'${turnstile}`,
     `frame-src ${turnstile ? TURNSTILE : "'none'"}`,
-    `connect-src 'self' ${api}`,
+    `connect-src 'self' ${api} ${photos}`,
     `img-src 'self' data: blob: ${photos}`,
-    `media-src 'self' ${photos}`,
+    `media-src 'self' blob: ${photos}`,
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "manifest-src 'self'",
