@@ -305,7 +305,7 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
             <MessageFiles files={m.files ?? []} removedNote="removed (6 months after the ticket was resolved, or their account was deleted)" />
             {m.attachments > 0 && (
               <p className="text-xs text-muted">
-                📎 {m.attachments} {m.attachments === 1 ? 'file' : 'files'} attached: open the email in the support Gmail inbox to see {m.attachments === 1 ? 'it' : 'them'}.
+                📎 {m.attachments} {(m.files ?? []).length > 0 ? 'more ' : ''}{m.attachments === 1 ? 'file' : 'files'} only in the email: open it in the support Gmail inbox.
               </p>
             )}
           </div>
