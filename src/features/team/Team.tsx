@@ -55,6 +55,7 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
   const team = useTeam()
   const [removing, setRemoving] = useState<TeamMember | null>(null)
   const [moving, setMoving] = useState<TeamMember | null>(null)
+  const [movingTickets, setMovingTickets] = useState<TeamMember | null>(null)
   const agents = (team.data ?? []).filter((m) => m.designation === 'FIELD_AGENT')
 
   return (
@@ -118,6 +119,11 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
                   >
                     Edit
                   </Link>
+                  {m.designation === 'SUPPORT' && (m.openTickets ?? 0) > 0 && (
+                    <Button variant="secondary" className="flex-1 text-sm" onClick={() => setMovingTickets(m)} aria-label={`Move ${m.name || m.phone}'s open tickets`}>
+                      Move open tickets
+                    </Button>
+                  )}
                   {m.designation === 'FIELD_AGENT' && m.pendingVisits > 0 && (
                     <Button variant="secondary" className="flex-1 text-sm" onClick={() => setMoving(m)} aria-label={`Move ${m.name || m.phone}'s waiting visits`}>
                       Move waiting visits
@@ -174,7 +180,85 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
           }}
         />
       )}
+      {movingTickets && (
+        <MoveTickets
+          from={movingTickets}
+          others={(team.data ?? []).filter((x) => x.designation === 'SUPPORT' && x.userId !== movingTickets.userId)}
+          onClose={() => setMovingTickets(null)}
+          onDone={(toName, moved, stayed) => {
+            const who = movingTickets.name || 'them'
+            setMovingTickets(null)
+            const left = stayed > 0 ? ` ${stayed} stayed with ${who}: nobody else could take ${stayed === 1 ? 'it' : 'them'} (their own question, or nobody else in support).` : ''
+            onNotice(moved === 0 && stayed === 0 ? 'No open tickets were left to move.' : `Moved ${moved} open ${moved === 1 ? 'ticket' : 'tickets'} to ${toName}.${left}`)
+            void qc.invalidateQueries({ queryKey: keys.team })
+            void qc.invalidateQueries({ queryKey: keys.tickets })
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/** A support person is away: every open ticket of theirs to one other support person, or shared out by the rule. */
+function MoveTickets({ from, others, onClose, onDone }: {
+  from: TeamMember
+  others: TeamMember[]
+  onClose: () => void
+  onDone: (toName: string, moved: number, stayed: number) => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  // One tap chooses, a second confirms: a slip on a phone never moves every ticket to the wrong person
+  const [chosen, setChosen] = useState<TeamMember | 'share' | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const who = from.name || `+91 ${formatPhone(from.phone)}`
+  async function move(to: TeamMember | null) {
+    setBusy(to?.userId ?? 'share')
+    setError(null)
+    try {
+      const r = await adminApi.moveTickets(from.userId, to?.userId ?? null)
+      onDone(to ? to.name || `+91 ${formatPhone(to.phone)}` : 'the other support people', r.moved, r.stayed)
+    } catch (e) {
+      setError(e)
+      setBusy(null)
+    }
+  }
+  return (
+    <Sheet open title={`Move ${who}'s ${from.openTickets} open ${from.openTickets === 1 ? 'ticket' : 'tickets'}`} onClose={busy ? () => {} : onClose}>
+      <div className="flex flex-col gap-2">
+        <p className="text-muted">For when they're away. New tickets still come to them while they're in support; change their designation to stop that.</p>
+        {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
+        {chosen !== null ? (
+          <>
+            <p className="font-semibold [overflow-wrap:anywhere]">
+              Move all {from.openTickets} to {chosen === 'share' ? 'the other support people, shared out' : chosen.name || `+91 ${formatPhone(chosen.phone)}`}?
+            </p>
+            <Button busy={busy !== null} onClick={() => void move(chosen === 'share' ? null : chosen)}>
+              Yes, move them
+            </Button>
+            <Button variant="secondary" disabled={busy !== null} onClick={() => setChosen(null)}>
+              Choose someone else
+            </Button>
+          </>
+        ) : (
+          <>
+            {others.length > 1 && (
+              <Button onClick={() => setChosen('share')}>Share among the other support people</Button>
+            )}
+            {others.map((o) => (
+              <Button key={o.userId} variant="secondary" onClick={() => setChosen(o)}>
+                {o.name || `+91 ${formatPhone(o.phone)}`} · {o.openTickets ?? 0} open
+              </Button>
+            ))}
+            {others.length === 0 && (
+              <p className="text-sm text-muted">Nobody else is in support yet: close this, then "Add a member" with the designation Support.</p>
+            )}
+            <Button variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+          </>
+        )}
+      </div>
+    </Sheet>
   )
 }
 

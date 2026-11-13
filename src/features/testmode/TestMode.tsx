@@ -52,10 +52,10 @@ export function TestMode() {
     }
   }
 
-  if (state.isPending) return <Page title="Test mode"><Loading /></Page>
+  if (state.isPending) return <Page title="Test mode" back="/more"><Loading /></Page>
   if (state.isError && !state.data) {
     return (
-      <Page title="Test mode">
+      <Page title="Test mode" back="/more">
         <ErrorState message={explain(state.error)} onRetry={() => void state.refetch()} />
       </Page>
     )
@@ -70,7 +70,7 @@ export function TestMode() {
   const emailFieldError = errorFor === 'add-email' ? emailError(error) : undefined
 
   return (
-    <Page title="Test mode">
+    <Page title="Test mode" back="/more">
       <Banner tone="warn">
         <ul className="flex list-disc flex-col gap-1 pl-4">
           <li>

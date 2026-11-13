@@ -570,7 +570,7 @@ export class MockApi {
       })
       const detail = (t: MockTicket) => ({
         ticket: summary(t), requesterId: t.requesterId, requesterEmail: t.requesterEmail, messages: t.messages,
-        events: t.events, profile: t.profile, earlierTickets: 0, emailsWaiting: t.emailsWaiting, emailsFailed: t.emailsFailed,
+        events: t.events, profile: t.profile, earlierTickets: t.requesterId ? this.tickets.filter((x) => x.requesterId === t.requesterId).length - 1 : 0, emailsWaiting: t.emailsWaiting, emailsFailed: t.emailsFailed,
         lastIncomingSeq: Math.max(0, ...t.messages.filter((m) => m.direction === 'IN').map((m) => m.seq as number)),
         version: t.version,
         senderVerified: t.senderVerified ?? true,
@@ -590,6 +590,41 @@ export class MockApi {
         const after = before ? rows.filter((t) => t.lastMessageAt < before || (t.lastMessageAt === before && t.id > String(beforeId))) : rows
         return ok(200, after.slice(0, 50).map(summary))
       }
+      if (p === '/admin/tickets/search') {
+        const q = (url.searchParams.get('q') ?? '').trim()
+        const requester = url.searchParams.get('requester')
+        // TicketService.search: a bare number, or "CLZ" and digits anywhere ("Re: [CLZ-1042] …"), else an email or a phone
+        const num = /^(?:CLZ\s*-?\s*)?(\d{1,9})$/i.exec(q) ?? (q.includes('@') ? null : /\bCLZ\s*-?\s*(\d{1,9})\b/i.exec(q))
+        let rows: MockTicket[]
+        if (requester) rows = this.tickets.filter((t) => t.requesterId === requester)
+        else if (num) rows = this.tickets.filter((t) => t.number === `CLZ-${Number(num[1])}`)
+        else if (q.includes('@')) rows = this.tickets.filter((t) => (t.requesterEmail ?? '').toLowerCase() === q.toLowerCase())
+        else if (/^\+?[\d\s-]{10,}$/.test(q)) rows = this.tickets.filter((t) => t.profile.some((s) => (s.lines as string[]).includes(`Phone: ${q.replace(/\D/g, '').slice(-10)}`)))
+        else return fail(400, 'VALIDATION_FAILED', 'Some fields are not valid', { q: 'type a ticket number (CLZ-1042), a mobile number or an email' })
+        if (support) rows = rows.filter((t) => t.assigneeId === this.user.id)
+        return ok(200, rows.slice(0, 50).map(summary))
+      }
+      if (p === '/admin/tickets/move' && method === 'POST') {
+        if (!isSuper) return superOnly()
+        const to = (body.toUserId as string | null) ?? null
+        if (to !== null && (to === body.fromUserId || !this.team.some((x) => x.userId === to && x.designation === 'SUPPORT'))) {
+          return fail(400, 'NOT_SUPPORT', 'Choose another support person.')
+        }
+        const others = this.team.filter((x) => x.designation === 'SUPPORT' && x.userId !== body.fromUserId)
+        let moved = 0
+        for (const t of this.tickets.filter((x) => x.assigneeId === body.fromUserId && x.status !== 'RESOLVED')) {
+          // Never to the person who asked it (TicketAssigner.moveAll): then by the rule, or it stays
+          const free = others.filter((o) => o.userId !== t.requesterId)
+          const target = (to && to !== t.requesterId ? to : null) ?? (free[moved % Math.max(1, free.length)]?.userId as string | undefined) ?? null
+          if (!target) continue
+          t.assigneeId = target
+          t.version += 1
+          moved++
+        }
+        this.team = this.team.map((x) => ({ ...x, openTickets: this.tickets.filter((t) => t.assigneeId === x.userId && t.status !== 'RESOLVED').length }))
+        const stayed = this.tickets.filter((t) => t.assigneeId === body.fromUserId && t.status !== 'RESOLVED').length
+        return ok(200, { moved, stayed })
+      }
       if (p === '/admin/tickets/counts') {
         const mineOpen = this.tickets.filter((t) => t.assigneeId === this.user.id && t.status === 'OPEN').length
         const unassigned = isSuper ? this.tickets.filter((t) => t.assigneeId === null && t.status !== 'RESOLVED').length : 0
@@ -606,7 +641,7 @@ export class MockApi {
           })
         return ok(200, { people, unassigned: this.tickets.filter((t) => t.assigneeId === null && t.status !== 'RESOLVED').length })
       }
-      const m = p.match(/^\/admin\/tickets\/([^/]+)(\/reply|\/close|\/assign)?$/)
+      const m = p.match(/^\/admin\/tickets\/([^/]+)(\/reply|\/close|\/assign|\/reopen)?$/)
       // The backend's ids are UUIDs (the fake's are t1001…): anything else is a 400 from the path's conversion
       if (m && !/^(t\d+|[0-9a-f-]{36})$/.test(decodeURIComponent(m[1]))) return fail(400, 'VALIDATION_FAILED', 'Some fields are not valid', { id: 'not valid' })
       const t = m ? this.tickets.find((x) => x.id === decodeURIComponent(m[1])) : undefined
@@ -634,6 +669,15 @@ export class MockApi {
         t.version += 1
         t.events.push({ event: body.resolve ? 'RESOLVED' : 'REPLIED', actor: this.user.name, detail: null, at: now })
         this.replies.push({ id: t.id, body: text, resolve: !!body.resolve })
+        return ok(200, detail(t))
+      }
+      if (m[2] === '/reopen') {
+        if (Number(body.version) !== t.version) return fail(409, 'TICKET_CHANGED', 'This ticket changed meanwhile. Check it again, then choose.')
+        if (t.status === 'RESOLVED') {
+          t.status = 'OPEN'
+          t.version += 1
+          t.events.push({ event: 'REOPENED', actor: this.user.name, detail: 'Opened again (nobody was emailed)', at: now })
+        }
         return ok(200, detail(t))
       }
       if (m[2] === '/close') {

@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router'
+import { Link, useLocation, useParams } from 'react-router'
 import { adminApi, keys, useTicket, useTicketStats } from '../../api/admin'
 import { ApiError, explain, isNetwork } from '../../api/errors'
 import type { TicketDetail as Detail } from '../../api/types'
@@ -31,15 +31,22 @@ function isGone(e: unknown): boolean {
  * reply is emailed to them; "Send & resolve" also resolves it. A super admin can move it to someone else. What is
  * typed is kept in this browser (per person) until it is sent, so leaving the page or a refusal never loses it.
  */
+/** Where the arrow goes: the list (with its view or search) the ticket was opened from, else all tickets. */
+function useBackTo(): string {
+  const state = useLocation().state as { back?: unknown } | null
+  return typeof state?.back === 'string' && state.back.startsWith('/tickets') ? state.back : '/tickets'
+}
+
 export function TicketDetail() {
+  const backTo = useBackTo()
   const { id = '' } = useParams()
   const me = useAdmin()
   const ticket = useTicket(id)
-  if (ticket.isPending) return <Page back="/tickets" title="Ticket"><Loading /></Page>
+  if (ticket.isPending) return <Page back={backTo} title="Ticket"><Loading /></Page>
   // Gone even with an older copy on screen: it was given to someone else (or never existed)
   if (ticket.isError && isGone(ticket.error)) {
     return (
-      <Page back="/tickets" title="Ticket">
+      <Page back={backTo} title="Ticket">
         {isSuperAdmin(me.adminRole) ? (
           <EmptyState title="Ticket not found" body="Check the link, or find it in the tickets list." />
         ) : (
@@ -50,7 +57,7 @@ export function TicketDetail() {
   }
   if (ticket.isError && !ticket.data) {
     return (
-      <Page back="/tickets" title="Ticket">
+      <Page back={backTo} title="Ticket">
         <ErrorState message={explain(ticket.error)} onRetry={() => void ticket.refetch()} />
       </Page>
     )
@@ -59,6 +66,7 @@ export function TicketDetail() {
 }
 
 function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () => void }) {
+  const backTo = useBackTo()
   const me = useAdmin()
   const qc = useQueryClient()
   const superAdmin = isSuperAdmin(me.adminRole)
@@ -75,6 +83,23 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
   const [seen, setSeen] = useState(d.lastIncomingSeq)
   const unread = d.lastIncomingSeq > seen
   const sending = useRef(false)
+  const [reopening, setReopening] = useState(false)
+
+  /** Closed by mistake: open it again; nobody is emailed. */
+  async function reopen() {
+    setReopening(true)
+    setError(null)
+    setNotice(null)
+    try {
+      took(await adminApi.reopenTicket(t.id, d.version))
+      setNotice('Opened again. Nobody was emailed.')
+    } catch (e) {
+      setError(e)
+      if (e instanceof ApiError && STALE_CODES.includes(e.code)) refetch()
+    } finally {
+      setReopening(false)
+    }
+  }
 
   useEffect(() => {
     if (text.trim()) storage.set(key, text)
@@ -128,7 +153,7 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
 
   return (
     <Page
-      back="/tickets"
+      back={backTo}
       title={t.number}
       footer={
         canReply ? (
@@ -199,9 +224,13 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
               Give to someone else
             </Button>
           )}
-          {t.status !== 'RESOLVED' && (
+          {t.status !== 'RESOLVED' ? (
             <Button variant="secondary" className="flex-1 text-sm" onClick={() => setClosing(seen)}>
               Close without reply
+            </Button>
+          ) : (
+            <Button variant="secondary" className="flex-1 text-sm" busy={reopening} onClick={() => void reopen()}>
+              Open again (no email)
             </Button>
           )}
         </div>
@@ -218,10 +247,10 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
             {d.senderVerified ? "No Clozest account uses this email, so there's no profile to show." : 'Not matched to an account: the sender is unproven.'}
           </p>
         )}
-        {d.earlierTickets > 0 && (
-          <p className="text-sm text-muted">
-            {d.earlierTickets} other {d.earlierTickets === 1 ? 'ticket' : 'tickets'} from them.
-          </p>
+        {d.earlierTickets > 0 && d.requesterId && (
+          <Link to={`/tickets?requester=${encodeURIComponent(d.requesterId)}`} className="text-sm text-link underline">
+            {d.earlierTickets} other {d.earlierTickets === 1 ? 'ticket' : 'tickets'} from them
+          </Link>
         )}
         {d.profile.map((s) => (
           <div key={s.title} className="flex flex-col gap-1 border-t border-line pt-2">

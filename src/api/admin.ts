@@ -119,6 +119,20 @@ export const adminApi = {
     }
     return api<TicketSummary[]>('GET', `${A}/tickets?${params}`, { signal })
   },
+  /** Tickets by a number (CLZ-1042), mobile number or email (`q`), or one account's (`requester`). */
+  searchTickets: (q: string | null, requester: string | null, signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    if (requester) params.set('requester', requester)
+    return api<TicketSummary[]>('GET', `${A}/tickets/search?${params}`, { signal })
+  },
+  /** Super admins: every open ticket of one person to another (null: shared out by the rule). */
+  moveTickets: (fromUserId: string, toUserId: string | null) =>
+    /** `stayed`: open ones nobody else could take (their own question, or nobody else in support). */
+    write<{ moved: number; stayed: number }>('POST', `${A}/tickets/move`, { fromUserId, toUserId }),
+  /** A resolved ticket opens again; nobody is emailed. */
+  reopenTicket: (id: string, version: number) =>
+    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/reopen`, { version }),
   ticketCounts: () => api<TicketCounts>('GET', `${A}/tickets/counts`),
   ticketStats: () => api<TicketStats>('GET', `${A}/tickets/stats`),
   ticket: (id: string) => api<TicketDetail>('GET', `${A}/tickets/${encodeURIComponent(id)}`),
@@ -170,6 +184,7 @@ export const keys = {
   tickets: ['admin', 'tickets'] as const,
   ticketList: (view: TicketView, assignee: string | null) => ['admin', 'tickets', 'list', view, assignee] as const,
   ticketCounts: ['admin', 'tickets', 'counts'] as const,
+  ticketSearch: (q: string, requester: string | null) => ['admin', 'tickets', 'search', q, requester] as const,
   ticketStats: ['admin', 'tickets', 'stats'] as const,
   ticket: (id: string) => ['admin', 'tickets', 'one', id] as const,
 }
@@ -287,5 +302,16 @@ export function useTicketStats(enabled: boolean) {
 /** A ticket, re-read every 30 seconds while open, so a new message from them shows up. */
 export function useTicket(id: string) {
   return useQuery({ queryKey: keys.ticket(id), queryFn: () => adminApi.ticket(id), refetchInterval: LIST_REFRESH_MS })
+}
+
+/** A search (or one person's tickets): asked only once something is typed or chosen. */
+export function useTicketSearch(q: string, requester: string | null) {
+  return useQuery({
+    queryKey: keys.ticketSearch(q, requester),
+    queryFn: ({ signal }) => adminApi.searchTickets(q || null, requester, signal),
+    enabled: q.length > 0 || requester !== null,
+    staleTime: 10_000,
+    placeholderData: keepPreviousData,
+  })
 }
 

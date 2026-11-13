@@ -1,4 +1,6 @@
+import { Link } from 'react-router'
 import { useMe } from '../api/admin'
+import { isSuperAdmin } from '../lib/roles'
 import { testModeActive, testModeText } from '../lib/time'
 import { useNow } from '../lib/useNow'
 
@@ -14,6 +16,15 @@ export function TestModeBanner() {
   return (
     <div role="alert" className="sticky top-0 z-40 bg-bad px-4 py-2 text-center text-sm font-semibold text-bg">
       {testModeText(flag!.until, now)}
+      {/* Test mode is no longer a tab: the warning itself leads to where it is switched off */}
+      {isSuperAdmin(me.data?.adminRole) && (
+        <>
+          {' '}
+          <Link to="/test-mode" className="underline">
+            Turn it off
+          </Link>
+        </>
+      )}
     </div>
   )
 }

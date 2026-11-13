@@ -244,6 +244,20 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.11.0 — 2026-11-12
+
+- **Find a ticket** (needs the backend's round-2 helpdesk, V47): the Tickets tab has a search box for a ticket number
+  (CLZ-1042, or just 1042), a mobile number or an email. A support person finds only their own tickets.
+- **"N other tickets from them"** on a ticket's page lists every ticket that person has sent.
+- **Open again (no email)** on a resolved ticket, for when they come back by phone: it opens again and nobody is emailed.
+- **Move open tickets** (Team, super admins): when a support person is away, move all their open tickets to one other
+  support person, or share them among the others; a second tap confirms. Tickets are never given to the person who
+  asked; the notice says how many stayed and why.
+- **Test mode is under More**: a super admin now has five tabs, so the labels fit on small phones. The red test-mode
+  line has "Turn it off", and Test mode has a back arrow.
+- The search is kept in the address, so ← from a ticket comes back to the same results; a name or half-typed number
+  says what can be searched instead of an error; a pasted email subject ("Re: [CLZ-1042] …") finds the ticket.
+
 ### 0.10.0 — 2026-11-12
 
 - **Support tickets** (needs backend V46). Questions sent to support@clozest.in or from "Need help" in the customer and

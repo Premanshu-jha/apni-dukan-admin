@@ -239,7 +239,7 @@ describe('links, phones and roles', () => {
     expect(tabsFor('ADMIN', 'FIELD_AGENT').map((t) => t.label)).toEqual(['Businesses', 'More'])
     expect(tabsFor('ADMIN').map((t) => t.label)).toEqual(['Businesses', 'More'])
     expect(tabsFor('ADMIN', 'SUPPORT').map((t) => t.label)).toEqual(['Tickets', 'More'])
-    expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Businesses', 'Tickets', 'Strikes', 'Team', 'Test mode', 'More'])
+    expect(tabsFor('SUPER_ADMIN').map((t) => t.label)).toEqual(['Businesses', 'Tickets', 'Strikes', 'Team', 'More'])
   })
 })
 
