@@ -316,6 +316,13 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 | 302 | An email to support with photos, PDFs or a video | kept on its message (at most 10; a big email read from R2) | The files on the message | HelpdeskIT.anEmailsPhotosAndPdfsGoOnItsMessage…, aBigEmailIsReadFromWhereTheWorkerParkedIt… | e2e:tickets "an email's files show…" | OK-tested |
 | 303 | Its other files (Word, zip, HEIC, past 10) | counted in `attachments` | "📎 1 more file only in the email: open it in the support Gmail inbox." (their names end the message's text) | HelpdeskIT.anEmailsPhotosAndPdfsGoOnItsMessage… | e2e:tickets "an email's files show…" | OK-tested |
 | 304 | A signature logo or tracking pixel in the email | skipped, not counted | — | HelpdeskIT.anEmailsPhotosAndPdfsGoOnItsMessage… | — | OK-tested |
+| 305 | Any kind of file on a ticket (from the app or an email: Word, zip, HEIC, a forwarded email), up to 30 an email | kept, only downloaded (`application/octet-stream`, `downloadUrl` with Content-Disposition) | "📎 notes.docx · 12 KB (download)" | HelpdeskIT.everyFileOfAnEmailGoesOnItsMessage…, thirtyFilesAreKept… | — | OK-tested |
+| 306 | Support attaches any kind of file to a reply | as the apps | "📎 Add photo, video or file" | — | e2e:tickets "…replies with a PDF" | OK-tested |
+| 307 | A resolved ticket open on the screen | not re-read every 30 s (a reply reopening it shows on coming back to the tab) | — | — | e2e:tickets "a resolved ticket on the screen is not re-read…" | OK-tested |
+| 308 | A flood of emails from one sender | after 30 in an hour the rest are dropped (kept in the support Gmail; files never stored) | — | HelpdeskIT.aFloodOfEmailsFromOneSender… | — | OK-tested |
+| 309 | A ticket written on at the very moment its person went away | moved to someone here within 5 minutes (StrandedTicketJob) | — | HelpdeskIT.aTicketLeftWithSomeoneAway… | — | OK-tested |
+| 310 | A file that runs when opened (exe, html, apk, macro document), from anyone's email | saved as "name.exe.download"; GIF/SVG banners pasted in emails skipped | "📎 invoice.exe · EXE file · 40 KB · Download" | FileRefServiceTest.aFileThatRunsWhenOpened… | — | OK-tested |
+| 311 | A HEIC photo on a ticket | "📎 IMG_0001.HEIC · iPhone photo (HEIC) · 3 MB · Download" | — | — | — | OK-untested |
 ## Site-wide
 
 | # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |

@@ -289,7 +289,8 @@ test("support sees the customer's photo and video on the ticket, and replies wit
   await expect(page.getByRole('list', { name: 'Files to send' }).getByText(/Attached/)).toBeVisible()
   await page.getByRole('button', { name: 'Send reply' }).click()
   await expect(page.getByText('Sent. They get your reply by email; the files are in their app (Need help, then My requests).')).toBeVisible()
-  await expect(page.getByRole('link', { name: /refund\.pdf/ })).toBeVisible()
+  await expect(page.getByRole('link', { name: /refund\.pdf/ }).first()).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Download refund.pdf' })).toBeVisible()
 })
 
 test('someone who only wrote by email gets no file picker: files could not reach them', async ({ page, context, api }) => {
@@ -297,7 +298,7 @@ test('someone who only wrote by email gets no file picker: files could not reach
   const t = api.addTicket({ assigneeId: api.user.id as string, requesterId: null, requesterEmail: 'vikram@gmail.com' })
   await page.goto(`/tickets/${t.id}`)
   await expect(page.getByText("They wrote by email and have no Clozest app, so files can't reach them: describe it in words.")).toBeVisible()
-  await expect(page.getByRole('button', { name: '📎 Add photo, video or PDF' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '📎 Add photo, video or file' })).toHaveCount(0)
 })
 
 test('a reply of files alone still waits for their new message to be read', async ({ page, context, api }) => {
@@ -334,4 +335,30 @@ test("an email's files show on its message; the ones we don't bring in are count
   await page.goto(`/tickets/${t.id}`)
   await expect(page.getByRole('link', { name: /bill\.pdf/ })).toBeVisible()
   await expect(page.getByText('📎 1 more file only in the email: open it in the support Gmail inbox.')).toBeVisible()
+})
+
+test('a resolved ticket on the screen is not re-read every 30 s; an open one is', async ({ page, context, api }) => {
+  await page.clock.install()
+  await asSupport(context, api)
+  const done = api.addTicket({ status: 'RESOLVED', assigneeId: api.user.id as string })
+  let reads = 0
+  page.on('request', (r) => {
+    if (r.method() === 'GET' && r.url().endsWith(`/admin/tickets/${done.id}`)) reads++
+  })
+  await page.goto(`/tickets/${done.id}`)
+  await expect(page.getByRole('heading', { name: new RegExp(done.number) })).toBeVisible()
+  const first = reads
+  await page.clock.fastForward('02:00')
+  expect(reads).toBe(first)
+
+  const open = api.addTicket({ assigneeId: api.user.id as string })
+  let openReads = 0
+  page.on('request', (r) => {
+    if (r.method() === 'GET' && r.url().endsWith(`/admin/tickets/${open.id}`)) openReads++
+  })
+  await page.goto(`/tickets/${open.id}`)
+  await expect(page.getByRole('heading', { name: new RegExp(open.number) })).toBeVisible()
+  const before = openReads
+  await page.clock.fastForward('00:35')
+  await expect.poll(() => openReads).toBeGreaterThan(before)
 })

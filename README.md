@@ -244,6 +244,16 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.15.0 — 2026-11-13
+
+- **Any kind of file on tickets** (needs the backend's round-5 helpdesk, V54): Word, Excel, zip, iPhone HEIC photos and
+  other files from the apps or emails show as downloads; a PDF has a "Download" link too; support can attach any file
+  to a reply ("📎 Add photo, video or file").
+- A resolved ticket open on the screen is no longer re-read every 30 seconds; a playing video keeps its place when its
+  link is renewed.
+- A downloaded file's row names its kind ("DOCX file", "iPhone photo (HEIC)"); a program or script someone emailed is
+  saved as "name.exe.download", so it never runs by a double click.
+
 ### 0.14.0 — 2026-11-13
 
 - **Files that come by email show on the ticket** (needs the backend's round-4b helpdesk, V52–V53): the photos, PDFs
