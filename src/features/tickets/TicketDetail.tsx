@@ -9,6 +9,7 @@ import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill, Shee
 import { isSuperAdmin } from '../../lib/roles'
 import { storage } from '../../lib/storage'
 import { dateTimeIst } from '../../lib/time'
+import { AttachmentPicker, MessageFiles, useAttachments } from './Attach'
 import { draftKey, EVENT_LABELS, SOURCE_LABELS, STATUS_LABELS, STATUS_TONES } from './labels'
 
 /** Longest reply the backend takes (TicketService.REPLY_MAX). */
@@ -73,6 +74,7 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
   const t = d.ticket
   const key = draftKey(me.userId, t.id)
   const [text, setText] = useState(() => storage.get(key) ?? '')
+  const files = useAttachments()
   const [busy, setBusy] = useState<'reply' | 'resolve' | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -106,10 +108,12 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
     else storage.remove(key)
   }, [text, key])
 
-  // Nothing typed yet: there is nothing to have missed, so the latest message counts as seen
+  // Nothing typed or attached yet: there is nothing to have missed, so the latest message counts as seen (a reply of
+  // files alone is a reply too: their new message must be read first)
+  const composing = text.trim() !== '' || files.items.length > 0
   useEffect(() => {
-    if (!text.trim()) setSeen(d.lastIncomingSeq)
-  }, [d.lastIncomingSeq, text])
+    if (!composing) setSeen(d.lastIncomingSeq)
+  }, [d.lastIncomingSeq, composing])
 
   function took(next: Detail) {
     qc.setQueryData(keys.ticket(t.id), next)
@@ -118,15 +122,18 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
   }
 
   async function send(resolve: boolean) {
-    if (sending.current || !text.trim() || unread) return
+    if (sending.current || !replyReady || unread) return
     sending.current = true
     setBusy(resolve ? 'resolve' : 'reply')
     setError(null)
     setNotice(null)
     try {
-      took(await adminApi.replyTicket(t.id, seen, text.trim(), resolve))
+      const withFiles = files.fileIds.length > 0
+      took(await adminApi.replyTicket(t.id, seen, text.trim(), resolve, files.fileIds))
       setText('')
-      setNotice(resolve ? 'Sent and resolved. They get your reply by email.' : 'Sent. They get your reply by email.')
+      files.clear()
+      const where = withFiles ? ' by email; the files are in their app (Need help, then My requests)' : ' by email'
+      setNotice(resolve ? `Sent and resolved. They get your reply${where}.` : `Sent. They get your reply${where}.`)
     } catch (e) {
       setError(e)
       if (e instanceof ApiError && STALE_CODES.includes(e.code)) refetch()
@@ -138,6 +145,8 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
 
   const length = cleanedLength(text)
   const tooLong = length > REPLY_MAX
+  // With a file the words may be left out; a file still going up (or failed) holds Send
+  const replyReady = !tooLong && !files.sending && !files.failed && (length > 0 || files.fileIds.length > 0)
   const canReply = d.requesterEmail !== null
   const hasPhone = d.profile.some((s) => s.lines.some((l) => l.startsWith('Phone: ')))
 
@@ -176,11 +185,18 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
               error={tooLong ? `At most ${REPLY_MAX} characters (now ${length}).` : undefined}
               placeholder="Hi, we've checked this and…"
             />
+            {d.requesterId !== null ? (
+              <AttachmentPicker a={files} id="reply-files" disabled={busy !== null} />
+            ) : (
+              <p className="text-xs text-muted">They wrote by email and have no Clozest app, so files can't reach them: describe it in words.</p>
+            )}
+            {files.sending && <p className="text-sm text-muted">Send works once the files have finished uploading.</p>}
+            {files.failed && <p className="text-sm text-bad">A file didn't go up: try it again or remove it.</p>}
             <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1" busy={busy === 'reply'} disabled={!length || tooLong || unread || busy !== null} onClick={() => void send(false)}>
+              <Button variant="secondary" className="flex-1" busy={busy === 'reply'} disabled={!replyReady || unread || busy !== null} onClick={() => void send(false)}>
                 Send reply
               </Button>
-              <Button className="flex-1" busy={busy === 'resolve'} disabled={!length || tooLong || unread || busy !== null} onClick={() => void send(true)}>
+              <Button className="flex-1" busy={busy === 'resolve'} disabled={!replyReady || unread || busy !== null} onClick={() => void send(true)}>
                 Send &amp; resolve
               </Button>
             </div>
@@ -285,7 +301,8 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
               {m.direction === 'OUT' ? `${m.author} (support)` : m.author} · {dateTimeIst(m.at)}
               {m.direction === 'IN' && m.senderVerified === false && ' · sender not proven'}
             </p>
-            <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.body}</p>
+            {m.body && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.body}</p>}
+            <MessageFiles files={m.files ?? []} removedNote="removed (6 months after the ticket was resolved, or their account was deleted)" />
             {m.attachments > 0 && (
               <p className="text-xs text-muted">
                 📎 {m.attachments} {m.attachments === 1 ? 'file' : 'files'} attached: open the email in the support Gmail inbox to see {m.attachments === 1 ? 'it' : 'them'}.
@@ -313,7 +330,13 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
           d={d}
           seen={closing}
           onClose={() => setClosing(null)}
-          onStale={refetch}
+          onStale={(e) => {
+            // It changed meanwhile: the sheet goes, so what changed is in view before choosing again
+            setClosing(null)
+            setNotice(null)
+            setError(e)
+            refetch()
+          }}
           onDone={(next) => {
             took(next)
             setClosing(null)
@@ -337,18 +360,18 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
   )
 }
 
-function CloseSheet({ d, seen, onClose, onStale, onDone }: { d: Detail; seen: number; onClose: () => void; onStale: () => void; onDone: (next: Detail) => void }) {
+function CloseSheet({ d, seen, onClose, onStale, onDone }: { d: Detail; seen: number; onClose: () => void; onStale: (e: unknown) => void; onDone: (next: Detail) => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   async function close() {
     setBusy(true)
     setError(null)
     try {
-      onDone(await adminApi.closeTicket(d.ticket.id, seen))
+      onDone(await adminApi.closeTicket(d.ticket.id, seen, d.version))
     } catch (e) {
-      setError(e)
-      if (e instanceof ApiError && STALE_CODES.includes(e.code)) onStale()
       setBusy(false)
+      if (e instanceof ApiError && STALE_CODES.includes(e.code)) onStale(e)
+      else setError(e)
     }
   }
   return (

@@ -271,3 +271,57 @@ test('a support person marks themselves away on their tickets page, and back', a
   await expect(page.getByText('Welcome back: new tickets come to you again.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Going on leave? Mark yourself away' })).toBeVisible()
 })
+
+test("support sees the customer's photo and video on the ticket, and replies with a PDF", async ({ page, context, api }) => {
+  await asSupport(context, api)
+  const t = api.addTicket({ assigneeId: api.user.id as string })
+  t.messages[0].files = [
+    { id: 'c1', contentType: 'image/jpeg', sizeBytes: 120000, name: 'door.jpg', url: 'https://photos.test/ticket-media/c1.png', removed: false },
+    { id: 'c2', contentType: 'video/mp4', sizeBytes: 4000000, name: null, url: 'https://photos.test/ticket-media/c2.mp4', removed: false },
+    { id: 'c3', contentType: 'image/jpeg', sizeBytes: 1000, name: 'old.jpg', url: null, removed: true },
+  ]
+  await page.goto(`/tickets/${t.id}`)
+  await expect(page.getByRole('img', { name: 'door.jpg' })).toBeVisible()
+  await expect(page.locator('video')).toHaveCount(1)
+  await expect(page.getByText(/old\.jpg: removed/)).toBeVisible()
+
+  await page.locator('#reply-files').setInputFiles({ name: 'refund.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 x') })
+  await expect(page.getByRole('list', { name: 'Files to send' }).getByText(/Attached/)).toBeVisible()
+  await page.getByRole('button', { name: 'Send reply' }).click()
+  await expect(page.getByText('Sent. They get your reply by email; the files are in their app (Need help, then My requests).')).toBeVisible()
+  await expect(page.getByRole('link', { name: /refund\.pdf/ })).toBeVisible()
+})
+
+test('someone who only wrote by email gets no file picker: files could not reach them', async ({ page, context, api }) => {
+  await asSupport(context, api)
+  const t = api.addTicket({ assigneeId: api.user.id as string, requesterId: null, requesterEmail: 'vikram@gmail.com' })
+  await page.goto(`/tickets/${t.id}`)
+  await expect(page.getByText("They wrote by email and have no Clozest app, so files can't reach them: describe it in words.")).toBeVisible()
+  await expect(page.getByRole('button', { name: '📎 Add photo, video or PDF' })).toHaveCount(0)
+})
+
+test('a reply of files alone still waits for their new message to be read', async ({ page, context, api }) => {
+  await asSupport(context, api)
+  const t = api.addTicket({ assigneeId: api.user.id as string })
+  await page.goto(`/tickets/${t.id}`)
+  await page.locator('#reply-files').setInputFiles({ name: 'refund.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 x') })
+  await expect(page.getByRole('list', { name: 'Files to send' }).getByText(/Attached/)).toBeVisible()
+  api.incoming(t.id, 'Actually it was the other booking')
+  await page.getByRole('button', { name: 'Send reply' }).click()   // refused, and the ticket is read again
+  await expect(page.getByText('Actually it was the other booking')).toBeVisible()
+  await expect(page.getByText('They wrote again while you were typing: read it above.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send & resolve' })).toBeDisabled()
+})
+
+test('closing a ticket someone opened again meanwhile asks to look again', async ({ page, context, api }) => {
+  await asSupport(context, api)
+  const t = api.addTicket({ assigneeId: api.user.id as string })
+  await page.goto(`/tickets/${t.id}`)
+  await page.getByRole('button', { name: 'Close without reply' }).click()
+  t.version += 1   // opened again or given to someone on another screen, while the sheet is up
+  await page.getByRole('button', { name: 'Close it' }).click()
+  await expect(page.getByText('This ticket changed meanwhile. Check it again, then choose.')).toBeVisible()
+  // The sheet goes: what changed is in view before closing again
+  await expect(page.getByRole('button', { name: 'Close it' })).toBeHidden()
+  expect(t.status).not.toBe('RESOLVED')
+})

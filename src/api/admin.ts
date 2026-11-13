@@ -144,11 +144,11 @@ export const adminApi = {
   ticketStats: () => api<TicketStats>('GET', `${A}/tickets/stats`),
   ticket: (id: string) => api<TicketDetail>('GET', `${A}/tickets/${encodeURIComponent(id)}`),
   /** Emails the answer to them; `resolve` also resolves the ticket. */
-  replyTicket: (id: string, seenSeq: number, body: string, resolve: boolean) =>
-    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/reply`, { seenSeq, body, resolve }),
+  replyTicket: (id: string, seenSeq: number, body: string, resolve: boolean, fileIds: string[] = []) =>
+    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/reply`, { seenSeq, body, resolve, fileIds }),
   /** Resolves without emailing anyone. */
-  closeTicket: (id: string, seenSeq: number) =>
-    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/close`, { seenSeq }),
+  closeTicket: (id: string, seenSeq: number, version: number) =>
+    write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/close`, { seenSeq, version }),
   /** Super admins: give it to someone else (null = Unassigned). */
   assignTicket: (id: string, version: number, assigneeId: string | null) =>
     write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/assign`, { version, assigneeId }),

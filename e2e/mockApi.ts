@@ -1,3 +1,4 @@
+import { TicketFilesMock } from './ticketFiles'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -418,7 +419,9 @@ export class MockApi {
   }
 
   async attach(context: BrowserContext) {
-    await context.route(`${PHOTOS}/**`, (route) => {
+    await context.route(`${PHOTOS}/**`, async (route) => {
+      // Support files are served by their own fake (a ticket's photos, videos and PDFs)
+      if (await this.ticketFiles.handle(route, new URL(route.request().url()), route.request().method(), this.user.id, this.cors())) return
       // A 1×1 PNG, so photos load without the internet; a salon video is a real little one (or a few bytes that
       // aren't a video, for a link that can't play)
       const path = new URL(route.request().url()).pathname
@@ -458,6 +461,8 @@ export class MockApi {
     const url = new URL(req.url())
     const method = req.method()
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: this.cors() })
+    // Support files (photos and PDFs here, a video to the fake R2): before the body is read as JSON
+    if (await this.ticketFiles.handle(route, url, method, this.user.id, this.cors())) return
     const raw = req.postData()
     const body = raw ? JSON.parse(raw) : undefined
     const auth = req.headers()['authorization'] ?? null
@@ -694,14 +699,18 @@ export class MockApi {
       if (!m[2]) return ok(200, detail(t))
       if (m[2] === '/reply') {
         const text = String(body.body ?? '').trim()
-        if (!text || text.length > 5000) return invalid({ body: 'write 1 to 5000 characters' })
+        const withFiles = Array.isArray(body.fileIds) && body.fileIds.length > 0
+        if ((!text && !withFiles) || text.length > 5000) return invalid({ body: 'write 1 to 5000 characters' })
         if (t.requesterEmail === null) return fail(409, 'REQUESTER_GONE', 'They deleted their account, so there is no address to send a reply to. Close the ticket instead.')
+        if (withFiles && t.requesterId === null) return fail(400, 'FILES_NEED_APP', "They wrote by email and have no Clozest account, so files can't reach them. Describe it in words.")
         if (detail(t).lastIncomingSeq > Number(body.seenSeq)) return fail(409, 'NEW_MESSAGE', 'They wrote again while you were typing. Read their new message, then send your reply.')
         if (t.assigneeId === null) {
           t.assigneeId = this.user.id
           t.events.push({ event: 'ASSIGNED', actor: this.user.name, detail: `Taken by ${this.user.name}`, at: now })
         }
-        t.messages.push({ seq: t.messages.length + 1, direction: 'OUT', author: this.user.name, body: text, attachments: 0, senderVerified: true, at: now })
+        const taken = this.ticketFiles.take(body.fileIds, this.user.id)
+        if (!Array.isArray(taken)) return fail(taken.status, taken.code, taken.message)
+        t.messages.push({ seq: t.messages.length + 1, direction: 'OUT', author: this.user.name, body: text, attachments: 0, senderVerified: true, at: now, files: taken })
         t.status = body.resolve ? 'RESOLVED' : 'WAITING'
         t.lastMessageAt = now
         t.emailsWaiting += 1
@@ -720,6 +729,8 @@ export class MockApi {
         return ok(200, detail(t))
       }
       if (m[2] === '/close') {
+        // TicketService.close: changed meanwhile (opened again, given to someone): look again first
+        if (body.version !== undefined && body.version !== null && Number(body.version) !== t.version) return fail(409, 'TICKET_CHANGED', 'This ticket changed meanwhile. Check it again, then choose.')
         if (detail(t).lastIncomingSeq > Number(body.seenSeq)) return fail(409, 'NEW_MESSAGE', 'They wrote again. Read their new message before closing the ticket.')
         if (t.status !== 'RESOLVED') {
           if (t.assigneeId === null) t.assigneeId = this.user.id
@@ -1212,6 +1223,8 @@ export class MockApi {
 
   /** Support tickets (TicketService), newest last added. */
   tickets: MockTicket[] = []
+  /** Support files (TicketFileService): photos and PDFs, videos to the fake R2; shown from the photo server. */
+  ticketFiles = new TicketFilesMock(API, PHOTOS)
   /** Support people marked away (TicketService.setAway): userId → since. */
   away = new Map<string, string>()
   /** Every reply sent, in order (one per tap that reached the backend). */
