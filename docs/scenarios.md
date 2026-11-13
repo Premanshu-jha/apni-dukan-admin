@@ -313,6 +313,9 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 | 299 | A reply of files alone while they write again | 409 NEW_MESSAGE | "They wrote again while you were typing: read it above." stays until "I've read it" (picked files count as typing) | — | e2e:tickets "a reply of files alone…" | OK-tested (fixed: could resolve over an unread message) |
 | 300 | An email on their ticket from an address they gave up | shown as "Someone else (from an email address they no longer use)", not proven; never quoted in our reply | — | HelpdeskIT.anEmailFromAnAddressTheyGaveUp… | — | OK-tested (fixed) |
 | 301 | A file didn't go up | — | "A file didn't go up: try it again or remove it." by the buttons | — | — | OK-untested (INCONVENIENCE, fixed) |
+| 302 | An email to support with photos, PDFs or a video | kept on its message (at most 10; a big email read from R2) | The files on the message | HelpdeskIT.anEmailsPhotosAndPdfsGoOnItsMessage…, aBigEmailIsReadFromWhereTheWorkerParkedIt… | e2e:tickets "an email's files show…" | OK-tested |
+| 303 | Its other files (Word, zip, HEIC, past 10) | counted in `attachments` | "📎 1 more file only in the email: open it in the support Gmail inbox." (their names end the message's text) | HelpdeskIT.anEmailsPhotosAndPdfsGoOnItsMessage… | e2e:tickets "an email's files show…" | OK-tested |
+| 304 | A signature logo or tracking pixel in the email | skipped, not counted | — | HelpdeskIT.anEmailsPhotosAndPdfsGoOnItsMessage… | — | OK-tested |
 ## Site-wide
 
 | # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |
