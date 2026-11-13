@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
-import { useTicketList, useTicketSearch, useTicketStats } from '../../api/admin'
+import { useQueryClient } from '@tanstack/react-query'
+import { adminApi, useAway, useTicketList, useTicketSearch, useTicketStats } from '../../api/admin'
 import { explain, isNetwork } from '../../api/errors'
 import type { TicketSummary, TicketView } from '../../api/types'
 import { useAdmin } from '../../app/guards'
 import { Banner, Button, Card, Chip, EmptyState, ErrorState, Field, Loading, Page, Pill } from '../../components/ui'
 import { useDebounced } from '../../lib/useDebounced'
-import { isSuperAdmin } from '../../lib/roles'
+import { isSuperAdmin, isSupport } from '../../lib/roles'
+import { MarkAway } from '../team/MarkAway'
 import { howLong } from '../../lib/time'
 import { useNow } from '../../lib/useNow'
 import { isTicketView, SOURCE_LABELS, STATUS_LABELS, STATUS_TONES, VIEW_LABELS } from './labels'
@@ -75,6 +77,7 @@ export function TicketList() {
 
   return (
     <Page title={superAdmin ? 'Support tickets' : 'My tickets'}>
+      {isSupport(me.adminRole, me.designation) && <SelfAway />}
       <form role="search" onSubmit={(e) => e.preventDefault()}>
         <Field
           id="ticket-search"
@@ -240,5 +243,64 @@ function Row({ t, now, showAssignee }: { t: TicketSummary; now: number; showAssi
         {showAssignee && ` · ${t.assigneeName ?? 'Unassigned'}`}
       </span>
     </Link>
+  )
+}
+
+/**
+ * A support person's own away switch (leave, sick), on their tickets page: away, a line saying so with "I'm back";
+ * otherwise a small "Going on leave?" that asks first.
+ */
+function SelfAway() {
+  const me = useAdmin()
+  const qc = useQueryClient()
+  const away = useAway(true)
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null)
+  const since = away.data?.find((a) => a.userId === me.userId)?.since
+  async function back() {
+    if (busy) return
+    setBusy(true)
+    try {
+      await adminApi.setAway(me.userId, false)
+      await qc.invalidateQueries({ queryKey: ['admin', 'tickets'] })
+      setNotice({ tone: 'good', text: 'Welcome back: new tickets come to you again.' })
+    } catch (e) {
+      setNotice({ tone: 'bad', text: explain(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (away.isPending) return null
+  if (away.isError && !away.data) return <p className="text-sm text-warn">Couldn't check whether you're marked away.</p>
+  return (
+    <>
+      {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}
+      {since ? (
+        <Banner tone="warn">
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            <span>You're marked away: no new tickets come to you.</span>
+            <Button variant="secondary" className="text-sm" busy={busy} onClick={() => void back()}>
+              I'm back
+            </Button>
+          </span>
+        </Banner>
+      ) : (
+        <button type="button" className="self-start text-sm text-link underline" onClick={() => setAsking(true)}>
+          Going on leave? Mark yourself away
+        </button>
+      )}
+      {asking && (
+        <MarkAway
+          member={{ userId: me.userId, name: me.name ?? '', phone: me.phone ?? '' }}
+          self
+          onClose={() => setAsking(false)}
+          onDone={(text) => {
+            setAsking(false)
+            setNotice({ tone: 'good', text })
+          }}
+        />
+      )}
+    </>
   )
 }
