@@ -244,6 +244,14 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.12.0 — 2026-11-13
+
+- **Away** (needs the backend's round-3 helpdesk, V48): on the Team page a super admin marks a support person away
+  for leave or a sick day ("Mark away", then confirm): their open tickets go to the other support people, no new
+  tickets go to them, and a reply to one of their old tickets goes to someone here. Their card says "Away since …";
+  "Back from away" ends it. A support person can do the same for themselves on their tickets page ("Going on
+  leave? Mark yourself away" / "I'm back"). "Move open tickets" and "Give to someone else" never offer someone away.
+
 ### 0.11.0 — 2026-11-12
 
 - **Find a ticket** (needs the backend's round-2 helpdesk, V47): the Tickets tab has a search box for a ticket number
