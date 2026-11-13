@@ -244,6 +244,19 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.13.0 — 2026-11-13
+
+- **Photos, videos and PDFs on tickets** (needs the backend's round-4a helpdesk, V49–V51): what the person sent shows on
+  their message (photos, a video player, PDF links), and support can attach up to 5 files to a reply ("📎 Add photo,
+  video or PDF"; the reply email says the files are in their app; not offered to someone who only wrote by email,
+  who has no app). A reply of files alone still waits for a new message of theirs to be read. Files are deleted 6
+  months after a ticket is resolved ("removed" shows in their place). An email from an address they gave up shows as
+  "Someone else".
+- **"Close without reply" checks nothing changed meanwhile**: a ticket opened again or given to someone else asks to
+  look again first (the sheet closes, so what changed is in view).
+- The Content-Security-Policy allows the R2 address for a video's upload (`connect-src`) and the preview (`media-src
+  blob:`).
+
 ### 0.12.0 — 2026-11-13
 
 - **Away** (needs the backend's round-3 helpdesk, V48): on the Team page a super admin marks a support person away

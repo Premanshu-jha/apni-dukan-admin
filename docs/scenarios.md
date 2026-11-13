@@ -304,6 +304,15 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 | 290 | "Back from away" fails | the error | A red notice (never green) | — | — | OK-untested |
 | 291 | A double tap on Mark away / Back | — | The button stays busy until the lists are re-read: sent once | — | — | OK-untested |
 | 292 | Tickets that stayed with someone away (nobody else could take them) | they stay until the customer writes again (then to someone here) or are moved by hand | — | HelpdeskIT.aResolvedTicketOfSomeoneAway… | — | OK-tested (backend) |
+| 293 | The person sent photos, videos or PDFs | `files` on each message (signed links, at least 15 minutes) | Photos (tap for full size), a video player, PDF links on the message; "removed" once deleted | HelpdeskIT.aPhotoSentWithAMessage… | e2e:tickets "support sees the customer's photo and video…" | OK-tested |
+| 294 | Support attaches a file to a reply | `fileIds` on the reply; the email says the files are in the app | "📎 Add photo, video or PDF" under the reply; Send waits; "…by email; the files are in their app (Need help, then My requests)" | HelpdeskIT.aPhotoSent… | e2e:tickets "…and replies with a PDF" | OK-tested |
+| 295 | A file only, no words, in a reply | allowed | — | HelpdeskIT.supportSendsAFileWithAReply… | — | OK-tested |
+| 296 | A person who wrote by email (no account) | files refused: 400 FILES_NEED_APP | No picker: "They wrote by email and have no Clozest app, so files can't reach them: describe it in words." | HelpdeskIT.supportSendsAFileWithAReply… | e2e:tickets "someone who only wrote by email…" | OK-tested (fixed: the files were unreachable, and the notice said they were in their app) |
+| 297 | "Close without reply" after someone opened it again or gave it to another | 409 TICKET_CHANGED | The sheet goes and the page shows "This ticket changed meanwhile. Check it again, then choose." over the re-read ticket | HelpdeskIT.closingATicketThatChangedMeanwhileAsksToLookAgain | e2e:tickets "closing a ticket someone opened again…" | OK-tested (fixed) |
+| 298 | Files 6 months after the ticket was resolved | deleted (TicketFileRetentionJob), words kept | "📎 name: removed…" | HelpdeskIT.aFileNeverSentIsDeleted… | e2e:tickets "support sees…" | OK-tested |
+| 299 | A reply of files alone while they write again | 409 NEW_MESSAGE | "They wrote again while you were typing: read it above." stays until "I've read it" (picked files count as typing) | — | e2e:tickets "a reply of files alone…" | OK-tested (fixed: could resolve over an unread message) |
+| 300 | An email on their ticket from an address they gave up | shown as "Someone else (from an email address they no longer use)", not proven; never quoted in our reply | — | HelpdeskIT.anEmailFromAnAddressTheyGaveUp… | — | OK-tested (fixed) |
+| 301 | A file didn't go up | — | "A file didn't go up: try it again or remove it." by the buttons | — | — | OK-untested (INCONVENIENCE, fixed) |
 ## Site-wide
 
 | # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |
