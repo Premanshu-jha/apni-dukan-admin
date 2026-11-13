@@ -311,9 +311,16 @@ export function useTicketStats(enabled: boolean) {
   return useQuery({ queryKey: keys.ticketStats, queryFn: adminApi.ticketStats, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
 }
 
-/** A ticket, re-read every 30 seconds while open, so a new message from them shows up. */
+/**
+ * A ticket, re-read every 30 seconds while open so a new message from them shows up. A resolved one isn't polled; it
+ * is read again on coming back to the tab (a reply that reopens it shows then).
+ */
 export function useTicket(id: string) {
-  return useQuery({ queryKey: keys.ticket(id), queryFn: () => adminApi.ticket(id), refetchInterval: LIST_REFRESH_MS })
+  return useQuery({
+    queryKey: keys.ticket(id),
+    queryFn: () => adminApi.ticket(id),
+    refetchInterval: (q) => (q.state.data?.ticket.status === 'RESOLVED' ? false : LIST_REFRESH_MS),
+  })
 }
 
 /** A search (or one person's tickets): asked only once something is typed or chosen. */

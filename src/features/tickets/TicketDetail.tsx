@@ -302,7 +302,7 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
               {m.direction === 'IN' && m.senderVerified === false && ' · sender not proven'}
             </p>
             {m.body && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.body}</p>}
-            <MessageFiles files={m.files ?? []} removedNote="removed (6 months after the ticket was resolved, or their account was deleted)" />
+            <MessageFiles files={m.files ?? []} removedNote="removed (6 months after the ticket was resolved or last written on, or their account was deleted)" />
             {m.attachments > 0 && (
               <p className="text-xs text-muted">
                 📎 {m.attachments} {(m.files ?? []).length > 0 ? 'more ' : ''}{m.attachments === 1 ? 'file' : 'files'} only in the email: open it in the support Gmail inbox.
