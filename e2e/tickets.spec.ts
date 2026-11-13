@@ -325,3 +325,13 @@ test('closing a ticket someone opened again meanwhile asks to look again', async
   await expect(page.getByRole('button', { name: 'Close it' })).toBeHidden()
   expect(t.status).not.toBe('RESOLVED')
 })
+
+test("an email's files show on its message; the ones we don't bring in are counted, to open in Gmail", async ({ page, context, api }) => {
+  await asSupport(context, api)
+  const t = api.addTicket({ requesterId: null, requesterEmail: 'vikram@gmail.com' })
+  t.messages[0].files = [{ id: 'e1', contentType: 'application/pdf', sizeBytes: 50000, name: 'bill.pdf', url: 'https://photos.test/ticket-media/e1.pdf', removed: false }]
+  t.messages[0].attachments = 1
+  await page.goto(`/tickets/${t.id}`)
+  await expect(page.getByRole('link', { name: /bill\.pdf/ })).toBeVisible()
+  await expect(page.getByText('📎 1 more file only in the email: open it in the support Gmail inbox.')).toBeVisible()
+})

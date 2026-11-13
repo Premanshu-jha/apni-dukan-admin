@@ -244,6 +244,12 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.14.0 — 2026-11-13
+
+- **Files that come by email show on the ticket** (needs the backend's round-4b helpdesk, V52–V53): the photos, PDFs
+  and videos in an email to support@clozest.in show on its message; the rest are counted, to open in the support
+  Gmail ("📎 1 more file only in the email…"; the email's text names them).
+
 ### 0.13.0 — 2026-11-13
 
 - **Photos, videos and PDFs on tickets** (needs the backend's round-4a helpdesk, V49–V51): what the person sent shows on
