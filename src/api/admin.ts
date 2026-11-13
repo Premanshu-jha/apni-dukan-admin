@@ -24,6 +24,8 @@ import type {
   TimelineEntry,
   TimelineNext,
   TimelinePage,
+  AwayChange,
+  AwayEntry,
 } from './types'
 import type { Decision } from '../lib/rules'
 
@@ -134,6 +136,11 @@ export const adminApi = {
   reopenTicket: (id: string, version: number) =>
     write<TicketDetail>('POST', `${A}/tickets/${encodeURIComponent(id)}/reopen`, { version }),
   ticketCounts: () => api<TicketCounts>('GET', `${A}/tickets/counts`),
+  /** Who is away: everyone for a super admin, themselves for a support person. */
+  away: () => api<AwayEntry[]>('GET', `${A}/tickets/away`),
+  /** Away: their open tickets go to the others and no new ones come; back: they take their share of Unassigned. */
+  setAway: (userId: string, away: boolean) =>
+    write<AwayChange>('PUT', `${A}/tickets/away/${encodeURIComponent(userId)}`, { away }),
   ticketStats: () => api<TicketStats>('GET', `${A}/tickets/stats`),
   ticket: (id: string) => api<TicketDetail>('GET', `${A}/tickets/${encodeURIComponent(id)}`),
   /** Emails the answer to them; `resolve` also resolves the ticket. */
@@ -184,6 +191,7 @@ export const keys = {
   tickets: ['admin', 'tickets'] as const,
   ticketList: (view: TicketView, assignee: string | null) => ['admin', 'tickets', 'list', view, assignee] as const,
   ticketCounts: ['admin', 'tickets', 'counts'] as const,
+  away: ['admin', 'tickets', 'away'] as const,
   ticketSearch: (q: string, requester: string | null) => ['admin', 'tickets', 'search', q, requester] as const,
   ticketStats: ['admin', 'tickets', 'stats'] as const,
   ticket: (id: string) => ['admin', 'tickets', 'one', id] as const,
@@ -291,6 +299,10 @@ export function useTicketList(view: TicketView, assignee: string | null) {
 }
 
 /** The menu badge: my tickets waiting on us (and Unassigned for super admins). */
+export function useAway(enabled: boolean) {
+  return useQuery({ queryKey: keys.away, queryFn: adminApi.away, enabled, staleTime: 10_000 })
+}
+
 export function useTicketCounts(enabled: boolean) {
   return useQuery({ queryKey: keys.ticketCounts, queryFn: adminApi.ticketCounts, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
 }
