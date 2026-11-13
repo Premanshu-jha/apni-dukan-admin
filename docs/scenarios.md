@@ -291,6 +291,19 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 | 277 | Reopen whose answer was lost, tapped again | 409 TICKET_CHANGED | The ticket is re-read and shows it open | — | — | OK-untested |
 | 278 | A super admin moves tickets while a support person has one open | their Send gets 409 NOT_YOURS; re-reading: "This ticket isn't yours" | as row 255 | HelpdeskIT.aSupportPersonCantOpenOrAnswer… | — | OK-tested (backend) |
 | 279 | Moved tickets: later replies to their resolved tickets | a reply to a resolved ticket goes back to its holder while they are in support | — | — | — | N/A-v1 (asked: an "away" switch) |
+| 280 | A support person is away (leave, sick): a super admin marks them | `PUT /admin/tickets/away/{id} {away:true}` → their open tickets shared out, `{moved, stayed}`; no new ones, and replies to their old ones go to someone here | Team: "Mark away" → what happens → "Yes, mark them away" → notice; "Away since …: gets no new tickets" on their card; never offered in "Move open tickets" | HelpdeskIT.someoneAwayGetsNoNewTickets…, aResolvedTicketOfSomeoneAwayGoesToSomeoneElse… | e2e:tickets "team: mark a support person away…" | OK-tested |
+| 281 | A support person marks themselves away, and back | the same, by themselves; anyone else's switch: 404 | My tickets: "Going on leave? Mark yourself away" → confirm → "You're marked away…" with "I'm back" | HelpdeskIT.someoneAway… | e2e:tickets "a support person marks themselves away…" | OK-tested |
+| 282 | Back from away | `{away:false}`: they take their share of Unassigned | "Back from away" (Team) / "I'm back" → notice | HelpdeskIT.everyoneAwayLeavesNewTicketsUnassigned… | e2e:tickets "team: mark a support person away…" (Unassigned comes to her) | OK-tested |
+| 283 | Everyone in support is away | new tickets wait in Unassigned (super admins see them); the first back takes them | — | HelpdeskIT.everyoneAway… | — | OK-tested (backend) |
+| 284 | Marking someone who isn't in support away | 400 NOT_SUPPORT | Only support cards have the button | HelpdeskIT.someoneAway… | — | OK-tested |
+| 285 | Someone away is removed from support or deleted | the away mark goes with it | — | — | — | OK-untested |
+| 286 | A super admin gives a ticket by hand to someone away | 400 AWAY | "Give to someone else" never lists people away | HelpdeskIT.aTicketIsNeverGivenByHandToSomeoneAway | — | OK-tested (backend) |
+| 287 | Someone away opens one of their own resolved tickets again | it stays theirs | as row 268 | HelpdeskIT.someoneAwayWhoOpensTheirOwnTicketAgainKeepsIt | — | OK-tested (backend) |
+| 288 | Someone marked away becomes a super admin | "back" still works for them; away only matters for support people | — | HelpdeskIT.someoneMarkedAwayWhoBecomesASuperAdmin… | — | OK-tested (backend) |
+| 289 | The away list can't be loaded (offline, 503) | — | Team: "Couldn't check who is away…" and no away buttons; My tickets: "Couldn't check whether you're marked away." | — | — | OK-untested |
+| 290 | "Back from away" fails | the error | A red notice (never green) | — | — | OK-untested |
+| 291 | A double tap on Mark away / Back | — | The button stays busy until the lists are re-read: sent once | — | — | OK-untested |
+| 292 | Tickets that stayed with someone away (nobody else could take them) | they stay until the customer writes again (then to someone here) or are moved by hand | — | HelpdeskIT.aResolvedTicketOfSomeoneAway… | — | OK-tested (backend) |
 ## Site-wide
 
 | # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |

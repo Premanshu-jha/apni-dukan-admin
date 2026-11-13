@@ -604,6 +604,42 @@ export class MockApi {
         if (support) rows = rows.filter((t) => t.assigneeId === this.user.id)
         return ok(200, rows.slice(0, 50).map(summary))
       }
+      if (p === '/admin/tickets/away' && method === 'GET') {
+        const all = [...this.away].map(([userId, since]) => ({ userId, since }))
+        return ok(200, support ? all.filter((a) => a.userId === this.user.id) : all)
+      }
+      const awayMatch = p.match(/^\/admin\/tickets\/away\/([^/]+)$/)
+      if (awayMatch && method === 'PUT') {
+        const id = awayMatch[1]
+        if (!isSuper && id !== this.user.id) return fail(404, 'NOT_FOUND', 'Page not found')
+        if (!this.team.some((x) => x.userId === id && x.designation === 'SUPPORT')) return fail(400, 'NOT_SUPPORT', 'Only a support person can be away.')
+        const recount = () => {
+          this.team = this.team.map((x) => ({ ...x, openTickets: this.tickets.filter((t) => t.assigneeId === x.userId && t.status !== 'RESOLVED').length }))
+        }
+        if (body.away) {
+          if (!this.away.has(id)) this.away.set(id, new Date().toISOString())
+          const others = this.team.filter((x) => x.designation === 'SUPPORT' && x.userId !== id && !this.away.has(x.userId as string))
+          let moved = 0
+          for (const t of this.tickets.filter((x) => x.assigneeId === id && x.status !== 'RESOLVED')) {
+            const free = others.filter((o) => o.userId !== t.requesterId)
+            const target = free[moved % Math.max(1, free.length)]?.userId as string | undefined
+            if (!target) continue
+            t.assigneeId = target
+            t.version += 1
+            moved++
+          }
+          recount()
+          return ok(200, { away: true, moved, stayed: this.tickets.filter((x) => x.assigneeId === id && x.status !== 'RESOLVED').length })
+        }
+        this.away.delete(id)
+        // Back: they take their share of Unassigned (TicketAssigner.joinedSupport; here, all of it)
+        for (const t of this.tickets.filter((x) => x.assigneeId === null && x.status !== 'RESOLVED' && x.requesterId !== id)) {
+          t.assigneeId = id
+          t.version += 1
+        }
+        recount()
+        return ok(200, { away: false, moved: 0, stayed: this.tickets.filter((x) => x.assigneeId === id && x.status !== 'RESOLVED').length })
+      }
       if (p === '/admin/tickets/move' && method === 'POST') {
         if (!isSuper) return superOnly()
         const to = (body.toUserId as string | null) ?? null
@@ -648,6 +684,9 @@ export class MockApi {
       if (!m || !t) return fail(404, 'NOT_FOUND', 'Ticket not found.')
       // TicketService.assign: super admins only, checked first
       if (m[2] === '/assign' && !isSuper) return superOnly()
+      if (m[2] === '/assign' && body.assigneeId && this.away.has(body.assigneeId as string)) {
+        return fail(400, 'AWAY', 'That person is away. Choose someone who is here.')
+      }
       if (support && t.assigneeId !== this.user.id) {
         return m[2] ? fail(409, 'NOT_YOURS', 'This ticket was given to someone else meanwhile.') : fail(404, 'NOT_FOUND', 'Ticket not found.')
       }
@@ -1173,6 +1212,8 @@ export class MockApi {
 
   /** Support tickets (TicketService), newest last added. */
   tickets: MockTicket[] = []
+  /** Support people marked away (TicketService.setAway): userId → since. */
+  away = new Map<string, string>()
   /** Every reply sent, in order (one per tap that reached the backend). */
   replies: Array<{ id: string; body: string; resolve: boolean }> = []
 

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router'
-import { adminApi, keys, useTicket, useTicketStats } from '../../api/admin'
+import { adminApi, keys, useTicket, useTicketStats, useAway } from '../../api/admin'
 import { ApiError, explain, isNetwork } from '../../api/errors'
 import type { TicketDetail as Detail } from '../../api/types'
 import { useAdmin } from '../../app/guards'
@@ -374,7 +374,10 @@ function MoveSheet({ d, onClose, onStale, onDone }: { d: Detail; onClose: () => 
   const stats = useTicketStats(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<unknown>(null)
-  const people = (stats.data?.people ?? []).filter((p) => p.support && p.userId !== d.ticket.assigneeId && p.userId !== d.requesterId)
+  const away = useAway(true)
+  // Never someone away (the backend refuses: AWAY)
+  const awayIds = new Set((away.data ?? []).map((a) => a.userId))
+  const people = (stats.data?.people ?? []).filter((p) => p.support && p.userId !== d.ticket.assigneeId && p.userId !== d.requesterId && !awayIds.has(p.userId))
   async function give(to: string | null) {
     setBusy(to ?? 'none')
     setError(null)
@@ -384,6 +387,7 @@ function MoveSheet({ d, onClose, onStale, onDone }: { d: Detail; onClose: () => 
     } catch (e) {
       setError(e)
       if (e instanceof ApiError && STALE_CODES.includes(e.code)) onStale()
+      if (e instanceof ApiError && e.code === 'AWAY') void away.refetch()   // that person drops out of the list
       setBusy(null)
     }
   }

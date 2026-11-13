@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { adminApi, keys, useCoverage, useTeam } from '../../api/admin'
+import { adminApi, keys, useAway, useCoverage, useTeam } from '../../api/admin'
 import { explain } from '../../api/errors'
 import type { Moved, TeamMember } from '../../api/types'
 import { useAdmin } from '../../app/guards'
 import { Tabs } from '../../components/Tabs'
+import { MarkAway } from './MarkAway'
 import { Banner, Button, Card, Chip, EmptyState, ErrorState, Field, Loading, Page, Pill, Sheet } from '../../components/ui'
 import { DESIGNATION_LABELS, ROLE_LABELS } from '../../lib/labels'
 import { formatPhone } from '../../lib/phone'
@@ -43,7 +44,7 @@ export function Team() {
           navigate({ search: v === 'coverage' ? '?view=coverage' : '' }, { replace: true, state: null })
         }}
       />
-      {notice && <Banner tone="good">{notice}</Banner>}
+      {notice && <Banner tone={notice.startsWith('⚠ ') ? 'bad' : 'good'}>{notice.replace(/^⚠ /, '')}</Banner>}
       {view === 'members' ? <Members onNotice={setNotice} /> : <Coverage />}
     </Page>
   )
@@ -56,6 +57,24 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
   const [removing, setRemoving] = useState<TeamMember | null>(null)
   const [moving, setMoving] = useState<TeamMember | null>(null)
   const [movingTickets, setMovingTickets] = useState<TeamMember | null>(null)
+  const [markingAway, setMarkingAway] = useState<TeamMember | null>(null)
+  const [backBusy, setBackBusy] = useState<string | null>(null)
+  const awayList = useAway(true)
+  const awaySince = new Map((awayList.data ?? []).map((a) => [a.userId, a.since]))
+  async function back(m: TeamMember) {
+    if (backBusy) return
+    setBackBusy(m.userId)
+    try {
+      await adminApi.setAway(m.userId, false)
+      // The button stays busy until the lists say so: a second tap never sends it twice
+      await Promise.all([qc.invalidateQueries({ queryKey: ['admin', 'tickets'] }), qc.invalidateQueries({ queryKey: keys.team })])
+      onNotice(`${m.name || 'They'} ${m.name ? 'is' : 'are'} back: new tickets go to them again.`)
+    } catch (e) {
+      onNotice(`⚠ ${explain(e)}`)
+    } finally {
+      setBackBusy(null)
+    }
+  }
   const agents = (team.data ?? []).filter((m) => m.designation === 'FIELD_AGENT')
 
   return (
@@ -70,6 +89,10 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
       ) : team.data.length === 0 ? (
         <EmptyState title="No one on the team yet" />
       ) : (
+        <>
+        {awayList.isError && !awayList.data && (
+          <Banner tone="warn">Couldn't check who is away, so the away buttons are hidden. Try again in a moment.</Banner>
+        )}
         <ul className="flex flex-col gap-2" aria-label="Team">
           {team.data.map((m) => (
             <li key={m.userId}>
@@ -95,6 +118,9 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
                   {m.designation === 'SUPPORT' && (
                     <p className="text-sm text-muted">
                       {m.openTickets ?? 0} open {(m.openTickets ?? 0) === 1 ? 'ticket' : 'tickets'}
+                      {awaySince.has(m.userId) && (
+                        <span className="font-semibold text-warn"> · Away since {dateIst(awaySince.get(m.userId)!)}: gets no new tickets</span>
+                      )}
                     </p>
                   )}
                   {m.designation === 'FIELD_AGENT' && (
@@ -124,6 +150,17 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
                       Move open tickets
                     </Button>
                   )}
+                  {m.designation === 'SUPPORT' &&
+                    awayList.data &&
+                    (awaySince.has(m.userId) ? (
+                      <Button variant="secondary" className="flex-1 text-sm" busy={backBusy === m.userId} onClick={() => void back(m)} aria-label={`Back from away: ${m.name || m.phone}`}>
+                        Back from away
+                      </Button>
+                    ) : (
+                      <Button variant="secondary" className="flex-1 text-sm" onClick={() => setMarkingAway(m)} aria-label={`Mark away: ${m.name || m.phone}`}>
+                        Mark away
+                      </Button>
+                    ))}
                   {m.designation === 'FIELD_AGENT' && m.pendingVisits > 0 && (
                     <Button variant="secondary" className="flex-1 text-sm" onClick={() => setMoving(m)} aria-label={`Move ${m.name || m.phone}'s waiting visits`}>
                       Move waiting visits
@@ -139,8 +176,20 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
             </li>
           ))}
         </ul>
+        </>
       )}
 
+      {markingAway && (
+        <MarkAway
+          member={markingAway}
+          self={false}
+          onClose={() => setMarkingAway(null)}
+          onDone={(text) => {
+            setMarkingAway(null)
+            onNotice(text)
+          }}
+        />
+      )}
       {removing && (
         <RemoveMember
           member={removing}
@@ -183,7 +232,7 @@ function Members({ onNotice }: { onNotice: (text: string | null) => void }) {
       {movingTickets && (
         <MoveTickets
           from={movingTickets}
-          others={(team.data ?? []).filter((x) => x.designation === 'SUPPORT' && x.userId !== movingTickets.userId)}
+          others={(team.data ?? []).filter((x) => x.designation === 'SUPPORT' && x.userId !== movingTickets.userId && !awaySince.has(x.userId))}
           onClose={() => setMovingTickets(null)}
           onDone={(toName, moved, stayed) => {
             const who = movingTickets.name || 'them'
@@ -427,3 +476,4 @@ function Coverage() {
     </>
   )
 }
+

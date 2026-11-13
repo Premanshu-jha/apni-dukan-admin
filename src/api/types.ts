@@ -432,6 +432,19 @@ export interface TicketDetail {
 }
 
 /** GET /admin/tickets/counts: for the menu badge. */
+/** GET /admin/tickets/away: a support person who is away (leave, sick), and since when. */
+export interface AwayEntry {
+  userId: string
+  since: string
+}
+
+/** PUT /admin/tickets/away/{userId}: their open tickets given to others (marked away), and what stayed. */
+export interface AwayChange {
+  away: boolean
+  moved: number
+  stayed: number
+}
+
 export interface TicketCounts {
   mineOpen: number
   unassigned: number
