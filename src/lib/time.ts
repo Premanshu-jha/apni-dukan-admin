@@ -18,6 +18,16 @@ export function dateIst(instant: string): string {
   return formatInTimeZone(new Date(instant), IST, 'd MMM yyyy')
 }
 
+/** "31 Mar 2027" for a date (YYYY-MM-DD), whatever zone the phone is in. */
+export function dateOnly(day: string): string {
+  return formatInTimeZone(new Date(`${day}T00:00:00Z`), 'UTC', 'd MMM yyyy')
+}
+
+/** Today's date in India, YYYY-MM-DD. */
+export function todayInIndia(now: number = Date.now()): string {
+  return istDate(now)
+}
+
 function istDate(instant: number): string {
   return formatInTimeZone(new Date(instant), IST, 'yyyy-MM-dd')
 }
