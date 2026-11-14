@@ -19,11 +19,11 @@ import type {
 } from '../../api/types'
 import { Photo } from '../../components/Photo'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
-import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
+import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, licenceCheckText, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
 import { directionsUrl, distanceLabel, telUrl } from '../../lib/links'
 import { formatPhone } from '../../lib/phone'
 import { clean, DECISION_LABELS, decisionsFor, liveRecheck, waitingForVisit, type Decision } from '../../lib/rules'
-import { dateIst, dateTimeIst } from '../../lib/time'
+import { dateIst, dateOnly, dateTimeIst } from '../../lib/time'
 import { clock12, rupees } from '../../lib/salon'
 import { type Conflict, DecisionSheet, type Draft, EMPTY_DRAFT, NoteSheet } from './DecisionSheet'
 
@@ -285,7 +285,7 @@ export function ShopDetail() {
           onDone={(text) => {
             setNotice(text)
             void qc.invalidateQueries({ queryKey: keys.shop(shop.id) })
-            void qc.invalidateQueries({ queryKey: keys.documentsToCheck })
+            void qc.invalidateQueries({ queryKey: keys.licencesToFollowUp })
           }}
         />
       )}
@@ -320,8 +320,9 @@ export function ShopDetail() {
             <Row label="Area">{shop.area}</Row>
             <Row label="City">{shop.city}</Row>
             <Row label="Pincode">{shop.pincode}</Row>
-            <Row label="GSTIN">{shop.gstin || '—'}</Row>
-            <Row label="Udyam">{shop.udyamNumber || '—'}</Row>
+            {/* A salon has none now (its trade licence counts): the rows only for a kirana */}
+            {shop.type !== 'SALON' && <Row label="GSTIN">{shop.gstin || '—'}</Row>}
+            {shop.type !== 'SALON' && <Row label="Udyam">{shop.udyamNumber || '—'}</Row>}
             <Row label="Registered">{dateIst(shop.createdAt)}</Row>
             {data.salon && data.salon.serviceList === undefined && <Row label="Barbers">{String(data.salon.barbers)}</Row>}
             {data.salon && data.salon.serviceList === undefined && <Row label="Services">{String(data.salon.services)}</Row>}
@@ -565,10 +566,10 @@ function SalonVideo({ url }: { url: string | null }) {
   )
 }
 
-/** The salon's registration document (any one of three), to check against the shop on the visit. */
 /**
- * The salon's optional registration document: open it, mark it as checked (customers then see "Registered"), or take
- * a wrong or expired one off with the reason the owner is told. Approving a salon after its visit checks it too.
+ * The salon's optional trade licence and its automatic check (no one marks it as checked: the check decides): open
+ * it, see what was read and why it passed or not, or take a wrong or someone else's licence off with the reason the
+ * owner is told.
  */
 function RegistrationDocument({
   doc,
@@ -601,11 +602,15 @@ function RegistrationDocument({
       setBusy(false)
     }
   }
+  const remove = () => run(() => adminApi.removeDocument(shopId, version, reason.trim()), 'Trade licence removed. The owner was told why.')
+  // Only a trade licence is checked; one not accepted (its details fixed since, or a misread) or waiting long
+  const canRecheck = doc?.type === 'TRADE_LICENCE' && doc.check !== 'PASSED'
+  const read = doc?.read ?? null
   return (
     <section aria-labelledby="reg-doc" className="flex flex-col gap-2">
-      <h2 id="reg-doc" className="font-semibold">Registration document</h2>
+      <h2 id="reg-doc" className="font-semibold">Trade licence</h2>
       {!doc ? (
-        <p className="rounded-xl border border-dashed border-line p-3 text-sm text-muted">None added</p>
+        <p className="rounded-xl border border-dashed border-line p-3 text-sm text-muted">None added: no "Licensed" badge</p>
       ) : (
         <Card className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
@@ -618,16 +623,37 @@ function RegistrationDocument({
               <span className="shrink-0 text-sm text-muted">File gone</span>
             )}
           </div>
-          <p className="text-sm text-muted">
-            {doc.checkedAt
-              ? `Checked ${dateTimeIst(doc.checkedAt)}: customers see "Registered".`
-              : 'Not checked yet: customers see "Unregistered" until it is.'}
-          </p>
+          <p className="text-sm">{licenceCheckText(doc)}</p>
+          {read && (
+            <details className="text-sm">
+              <summary className="cursor-pointer text-link">What the check read from it</summary>
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                <Row label="Number">{read.licenceNumber ?? '—'}</Row>
+                <Row label="Business">{read.tradeName ?? '—'}</Row>
+                <Row label="Holder">{read.ownerName ?? '—'}</Row>
+                <Row label="Address">{[read.address, read.pincode].filter(Boolean).join(' · ') || '—'}</Row>
+                <Row label="Trade">{read.tradeCategory ?? '—'}</Row>
+                <Row label="Issued by">{read.issuingBody ?? '—'}</Row>
+                <Row label="Valid until">{read.validUntil ? dateOnly(read.validUntil) : '—'}</Row>
+                <Row label="Flags">
+                  {[
+                    !read.readable && 'unreadable',
+                    !read.tradeLicence && 'not a trade licence',
+                    read.looksEdited && 'looks edited',
+                    read.provisional && 'provisional',
+                    !read.salonTrade && 'not a salon trade',
+                  ]
+                    .filter(Boolean)
+                    .join(', ') || 'none'}
+                </Row>
+              </dl>
+            </details>
+          )}
           {canAct && !removing && (
-            <div className="grid grid-cols-2 gap-2">
-              {!doc.checkedAt && (
-                <Button busy={busy} onClick={() => run(() => adminApi.checkDocument(shopId, version), 'Document marked as checked.')}>
-                  Mark as checked
+            <div className={canRecheck ? 'grid grid-cols-2 gap-2' : 'flex'}>
+              {canRecheck && (
+                <Button busy={busy} onClick={() => run(() => adminApi.recheckLicence(shopId, version), 'Sent for checking again.')}>
+                  Check again
                 </Button>
               )}
               <Button variant="secondary" disabled={busy} onClick={() => setRemoving(true)}>
@@ -647,13 +673,8 @@ function RegistrationDocument({
                   className="rounded-xl border border-line bg-surface p-3 text-base text-ink focus:border-brand focus:outline-none"
                 />
               </label>
-              <Button
-                variant="danger"
-                busy={busy}
-                disabled={reason.trim().length < 2}
-                onClick={() => run(() => adminApi.removeDocument(shopId, version, reason.trim()), 'Document removed. The owner was told why.')}
-              >
-                Remove the document
+              <Button variant="danger" busy={busy} disabled={reason.trim().length < 2} onClick={remove}>
+                Remove the trade licence
               </Button>
               <Button variant="secondary" disabled={busy} onClick={() => setRemoving(false)}>
                 Keep it

@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from 'react-router'
-import { useDashboard, useDocumentsToCheck } from '../../api/admin'
+import { useDashboard, useLicencesToFollowUp } from '../../api/admin'
 import { explain } from '../../api/errors'
 import type { ShopType } from '../../api/types'
 import { Tabs } from '../../components/Tabs'
@@ -18,7 +18,7 @@ export function Dashboard() {
   const raw = params.get('type')
   const type: ShopType = isShopType(raw) ? raw : 'KIRANA'
   const board = useDashboard()
-  const docs = useDocumentsToCheck(superAdmin && type === 'SALON')
+  const licences = useLicencesToFollowUp(superAdmin && type === 'SALON')
 
   return (
     <Page title="Businesses">
@@ -55,19 +55,19 @@ export function Dashboard() {
               )
             })}
           </ul>
-          {superAdmin && type === 'SALON' && docs.data && (
-            <section aria-labelledby="docs-to-check" className="flex flex-col gap-2">
-              <h2 id="docs-to-check" className="font-semibold">
-                Registration documents to check: {docs.data.length}
+          {superAdmin && type === 'SALON' && licences.data && (
+            <section aria-labelledby="licences" className="flex flex-col gap-2">
+              <h2 id="licences" className="font-semibold">
+                Trade licences to follow up: {licences.data.length}
               </h2>
-              {docs.data.length === 0 ? (
-                <p className="text-sm text-muted">None waiting. Live salons that add or change one appear here.</p>
+              {licences.data.length === 0 ? (
+                <p className="text-sm text-muted">None. Licences not accepted, or waiting over half an hour for their check, appear here.</p>
               ) : (
                 <ul className="flex flex-col gap-2">
-                  {docs.data.map((s) => (
+                  {licences.data.map((s) => (
                     <li key={s.id}>
                       <Link to={`/shops/${s.id}`} className="flex flex-col rounded-2xl border border-line bg-surface p-3 hover:bg-raised">
-                        <span className="font-medium">
+                        <span className="font-medium [overflow-wrap:anywhere]">
                           #{s.shopCode} {s.name}
                         </span>
                         <span className="text-sm text-muted">
