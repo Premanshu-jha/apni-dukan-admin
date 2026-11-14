@@ -244,6 +244,21 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.16.0 — 2026-11-14
+
+Needs the backend with V55–V58 (the trade licence checked automatically). Deploy the backend first.
+
+- **A salon's trade licence is checked automatically now**, not by the field team: its section ("Trade licence")
+  says whether it passed (number, valid until; customers see "Licensed"), wasn't accepted (why, in words), expired, or
+  is being checked; "What the check read from it" shows the number, business, holder, address, trade, issuer and any
+  flags. "Mark as checked" and "Registration documents to check" on the dashboard are gone. A wrong or someone else's
+  licence can still be removed with a reason the owner is told.
+- **Check again** on a salon's trade licence that didn't pass sends it for checking once more (the section then says
+  since when it is being checked), and super admins see **"Trade licences to follow up"** on the dashboard: licences
+  waiting or not accepted for over 30 minutes.
+- **A salon has no GSTIN or Udyam number now**: the rows are gone from a salon's page and "GSTIN / Udyam doesn't
+  match" from a salon's visit checklist (a kirana keeps both).
+
 ### 0.15.0 — 2026-11-13
 
 - **Any kind of file on tickets** (needs the backend's round-5 helpdesk, V54): Word, Excel, zip, iPhone HEIC photos and
@@ -324,7 +339,7 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 ### 0.9.0 — 2026-11-12
 
 - **A live business's re-check while it stays live** (needs backend V41). A business whose owner changed a photo, the
-  video, the GSTIN or the Udyam number now stays live and waits in "Re-check after edit". The decisions, Assign and
+  video, or a kirana's GSTIN or Udyam number now stays live and waits in "Re-check after edit". The decisions, Assign and
   "Unassigned" follow `waitingForVisit` (`src/lib/rules.ts`: `waitingForVisit`, `liveRecheck`) instead of the status
   alone. For a live re-check the choices are **Approve** ("Checked. The business stays live…") and **Ask the owner to
   fix** (`POST …/ask-to-fix`: it stays live and waits, the owner sees your reason; timeline "Asked the owner to fix");
