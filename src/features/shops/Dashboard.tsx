@@ -1,12 +1,12 @@
 import { Link, useSearchParams } from 'react-router'
-import { useDashboard, useLicencesToFollowUp } from '../../api/admin'
+import { useDashboard, useLicenceAiUsage, useLicencesToFollowUp } from '../../api/admin'
 import { explain } from '../../api/errors'
 import type { ShopType } from '../../api/types'
 import { Tabs } from '../../components/Tabs'
 import { useAdmin } from '../../app/guards'
 import { Banner, ErrorState, Loading, Page } from '../../components/ui'
 import { isSuperAdmin } from '../../lib/roles'
-import { GROUP_LABELS, GROUPS, isShopType, SHOP_TYPES, TYPE_LABELS } from '../../lib/labels'
+import { GROUP_LABELS, GROUPS, isShopType, licenceAiProblem, licenceAiText, NO_ALERT_RECIPIENTS, SHOP_TYPES, TYPE_LABELS } from '../../lib/labels'
 
 /**
  * The six counts for kirana or salon; each opens its list. The tab is kept in the address (?type=SALON). A field
@@ -19,6 +19,9 @@ export function Dashboard() {
   const type: ShopType = isShopType(raw) ? raw : 'KIRANA'
   const board = useDashboard()
   const licences = useLicencesToFollowUp(superAdmin && type === 'SALON')
+  // Super admins, on both tabs: a stop is said wherever they land (Businesses opens on Kirana)
+  const ai = useLicenceAiUsage(superAdmin)
+  const aiProblem = ai.data ? licenceAiProblem(ai.data) : null
 
   return (
     <Page title="Businesses">
@@ -55,6 +58,41 @@ export function Dashboard() {
               )
             })}
           </ul>
+          {superAdmin && (type === 'SALON' || aiProblem || ai.data?.alertRecipients === 0) && (
+            <section aria-labelledby="licence-ai" className="flex flex-col gap-2">
+              <h2 id="licence-ai" className="font-semibold">
+                Licence checks (AI)
+              </h2>
+              {aiProblem && (
+                <Banner tone="bad">
+                  {aiProblem.text}
+                  {aiProblem.link && (
+                    <>
+                      {' '}
+                      <a href={aiProblem.link.href} target="_blank" rel="noreferrer" className="font-semibold underline">
+                        {aiProblem.link.label}
+                      </a>
+                    </>
+                  )}
+                </Banner>
+              )}
+              {ai.data && ai.data.alertRecipients === 0 && <Banner tone="warn">{NO_ALERT_RECIPIENTS}</Banner>}
+              {type === 'SALON' &&
+                (ai.isPending ? (
+                  <p className="text-sm text-muted">Loading what the checks cost…</p>
+                ) : ai.isError && !ai.data ? (
+                  <ErrorState message={`Couldn't read what the licence checks cost: ${explain(ai.error)}`} onRetry={() => void ai.refetch()} />
+                ) : ai.data ? (
+                  <>
+                    {ai.isError && <Banner tone="warn">Couldn't refresh this: {explain(ai.error)}</Banner>}
+                    <p className="text-sm">{licenceAiText(ai.data)}</p>
+                    <p className="text-sm text-muted">
+                      Counted by Clozest from each check; the Claude Console's Billing page has the official balance. Super admins get an email at 80% and 100%, and when the checks stop.
+                    </p>
+                  </>
+                ) : null)}
+            </section>
+          )}
           {superAdmin && type === 'SALON' && licences.data && (
             <section aria-labelledby="licences" className="flex flex-col gap-2">
               <h2 id="licences" className="font-semibold">

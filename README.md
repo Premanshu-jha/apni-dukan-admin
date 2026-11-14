@@ -244,6 +244,19 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.17.0 — 2026-11-14
+
+Needs the backend with V59 (credit alerts for the licence checks). Deploy the backend first.
+
+- **"Licence checks (AI)" on the dashboard** (super admins only). On the Salon tab: this credit period's dates, how
+  many licences the AI read and what that cost of the monthly budget ("$1.20 of $100.00 (1%)", cents rounded like
+  the emails), counted by the backend; the Claude Console's Billing page has the official balance. On both tabs
+  (Businesses opens on Kirana), when the checks stop, a red line says why (credit, the key, the model's name, or no
+  key at all), since when, what to do, with a link to the Console page that fixes it; and when no super admin has a
+  verified email, that nobody gets the alert emails. Super admins also get an email at 80% and 100% of the credit,
+  and when the checks stop and start again.
+- Tests: the fake backend answers `GET /admin/shops/licence-ai-usage` (`api.licenceAi`); unit tests for the texts.
+
 ### 0.16.0 — 2026-11-14
 
 Needs the backend with V55–V58 (the trade licence checked automatically). Deploy the backend first.

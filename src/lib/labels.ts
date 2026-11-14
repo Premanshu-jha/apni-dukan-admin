@@ -1,5 +1,5 @@
 import { dateOnly, dateTimeIst, howLong, todayInIndia } from './time'
-import type { AdminRole, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry, Designation } from '../api/types'
+import type { AdminRole, LicenceAiUsage, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry, Designation } from '../api/types'
 
 export const SHOP_TYPES: ShopType[] = ['KIRANA', 'SALON']
 export const TYPE_LABELS: Record<ShopType, string> = { KIRANA: 'Kirana', SALON: 'Salon' }
@@ -166,3 +166,66 @@ export const STRIKE_LABELS: Record<StrikeKind, string> = { NO_SHOW: 'No-show', L
 export const ROLE_LABELS: Record<AdminRole, string> = { NONE: 'Not on the team', ADMIN: 'Admin', SUPER_ADMIN: 'Super admin' }
 export const DESIGNATION_LABELS: Record<Designation, string> = { FIELD_AGENT: 'Field agent', SUPPORT: 'Support' }
 export const DESIGNATIONS: Designation[] = ['FIELD_AGENT', 'SUPPORT']
+
+/** Whole cents, rounding half up the way the backend's emails do (1.005 is $1.01, not the float's $1.00). */
+function cents(amount: number): number {
+  return Math.round(Number((amount * 100).toFixed(6)))
+}
+
+/** "$12.34": a dollar amount, to the cent. */
+export function usd(amount: number): string {
+  return `$${(cents(amount) / 100).toFixed(2)}`
+}
+
+/**
+ * The dashboard's line about the licence checks' AI: how many it read this credit period and what that cost of the
+ * budget ("4 Nov 2026 to 3 Dec 2026: 120 licences read, $1.20 of $100.00 (1%)"). The percent is of the cents shown,
+ * rounded down, so it never says 100% before the amount does.
+ */
+export function licenceAiText(u: LicenceAiUsage): string {
+  const budget = cents(u.budgetUsd)
+  const percent = budget > 0 ? Math.floor((cents(u.spentUsd) * 100) / budget) : 0
+  const read = u.reads === 1 ? '1 licence read' : `${u.reads} licences read`
+  return `${dateOnly(u.periodStart)} to ${dateOnly(u.periodEnd)}: ${read}, ${usd(u.spentUsd)} of ${usd(u.budgetUsd)} (${percent}%)`
+}
+
+/** Where to fix each problem: the Console's Billing or API keys page. */
+export const CONSOLE_BILLING = 'https://platform.claude.com/settings/billing'
+export const CONSOLE_KEYS = 'https://platform.claude.com/settings/keys'
+
+/**
+ * Why the licence checks stopped and what to do, or null while they work: the AI refusing our account, or no key
+ * at all. The link (Console's page to fix it) is shown after the text, when there is one.
+ */
+export function licenceAiProblem(u: LicenceAiUsage): { text: string; link: { href: string; label: string } | null } | null {
+  if (!u.keySet) {
+    return {
+      text: 'Licence checks are off: ANTHROPIC_API_KEY isn\'t set on the backend (Railway, apni-dukan-backend, Variables). Every licence waits as "Checking…".',
+      link: { href: CONSOLE_KEYS, label: 'Create a key in the Claude Console' },
+    }
+  }
+  if (!u.problem) return null
+  const since = u.problemSince ? ` since ${dateTimeIst(u.problemSince)}` : ''
+  const waiting = ' Salons see "Checking…"; nothing is refused, and every waiting licence is read once it works again.'
+  switch (u.problem) {
+    case 'CREDIT':
+      return {
+        text: `Licence checks are stopped${since}: Anthropic refuses for the API credit. Add credits (or turn on auto-reload), or they start again when next month's credit arrives.${waiting}`,
+        link: { href: CONSOLE_BILLING, label: 'Open Billing in the Claude Console' },
+      }
+    case 'KEY':
+      return {
+        text: `Licence checks are stopped${since}: Anthropic refuses our API key. Create a key and paste it in Railway (apni-dukan-backend, Variables, ANTHROPIC_API_KEY), then Deploy.${waiting}`,
+        link: { href: CONSOLE_KEYS, label: 'Open API keys in the Claude Console' },
+      }
+    case 'MODEL':
+      return {
+        text: `Licence checks are stopped${since}: Anthropic doesn't know the AI model asked for. In Railway (apni-dukan-backend, Variables), remove LICENCE_AI_MODEL or set a current model, then Deploy. The key works.${waiting}`,
+        link: null,
+      }
+  }
+}
+
+/** Shown when no super admin has a verified email: the alerts reach nobody. */
+export const NO_ALERT_RECIPIENTS =
+  'No super admin has a verified email, so nobody gets the emails about the licence checks (credit running low or used up, checks stopped). Add and verify an email in your profile.'

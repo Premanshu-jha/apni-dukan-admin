@@ -1,4 +1,5 @@
-import { CHECKLIST, CHECKLIST_LABELS, checklistFor, eventLabel, GROUP_LABELS, GROUPS, isGroup, isShopType, licenceCheckText, sinceText } from './labels'
+import type { LicenceAiUsage } from '../api/types'
+import { CHECKLIST, CHECKLIST_LABELS, checklistFor, eventLabel, GROUP_LABELS, GROUPS, isGroup, isShopType, licenceAiProblem, licenceAiText, licenceCheckText, sinceText, usd } from './labels'
 import { dateOnly, todayInIndia } from './time'
 import { directionsUrl, distanceLabel, telUrl } from './links'
 import { formatPhone, normalizePhone } from './phone'
@@ -281,5 +282,35 @@ describe('search box', () => {
     // Counted as the backend counts (code points): an emoji is one character, two are still too short
     expect(searchable('😀😀')).toEqual({ q: '', tooShort: true })
     expect(searchable('डाक')).toEqual({ q: 'डाक', tooShort: false })
+  })
+})
+
+describe('the licence checks\' AI on the dashboard', () => {
+  const usage: LicenceAiUsage = { periodStart: '2026-11-04', periodEnd: '2026-12-03', reads: 1, spentUsd: 0.006, budgetUsd: 100, problem: null, problemSince: null, keySet: true, alertRecipients: 2 }
+
+  it('says what was read and spent of the budget, in cents like the emails', () => {
+    expect(licenceAiText(usage)).toBe('4 Nov 2026 to 3 Dec 2026: 1 licence read, $0.01 of $100.00 (0%)')
+    expect(licenceAiText({ ...usage, reads: 7900, spentUsd: 79.99 })).toContain('7900 licences read, $79.99 of $100.00 (79%)')
+    expect(licenceAiText({ ...usage, spentUsd: 57 })).toContain('$57.00 of $100.00 (57%)')   // not 56% (57/100*100 in floats)
+    expect(licenceAiText({ ...usage, spentUsd: 99.996 })).toContain('$100.00 of $100.00 (100%)')   // the amount and the percent agree
+    expect(licenceAiText({ ...usage, spentUsd: 79.994 })).toContain('$79.99 of $100.00 (79%)')
+    expect(licenceAiText({ ...usage, spentUsd: 104.5 })).toContain('(104%)')
+    expect(usd(3)).toBe('$3.00')
+    expect(usd(1.005)).toBe('$1.01')   // half up, as the backend's emails
+  })
+
+  it('says why the checks stopped, what to do and where, or nothing while they work', () => {
+    expect(licenceAiProblem(usage)).toBeNull()
+    const credit = licenceAiProblem({ ...usage, problem: 'CREDIT', problemSince: '2026-11-20T04:30:00Z' })!
+    expect(credit.text).toContain('stopped since Fri 20 Nov, 10:00 AM: Anthropic refuses for the API credit')
+    expect(credit.link?.href).toBe('https://platform.claude.com/settings/billing')
+    const key = licenceAiProblem({ ...usage, problem: 'KEY', problemSince: null })!
+    expect(key.text).toContain('ANTHROPIC_API_KEY')
+    expect(key.link?.href).toBe('https://platform.claude.com/settings/keys')
+    const model = licenceAiProblem({ ...usage, problem: 'MODEL', problemSince: null })!
+    expect(model.text).toContain('LICENCE_AI_MODEL')
+    expect(model.text).toContain('The key works')
+    expect(model.link).toBeNull()
+    expect(licenceAiProblem({ ...usage, keySet: false })!.text).toContain("ANTHROPIC_API_KEY isn't set")
   })
 })

@@ -219,6 +219,24 @@ export type RegistrationDocType = 'SHOPS_ESTABLISHMENT' | 'TRADE_LICENCE' | 'UDY
 /** The automatic check of a salon's trade licence. */
 export type LicenceCheck = 'PENDING' | 'PASSED' | 'FAILED'
 
+/** GET /admin/shops/licence-ai-usage (super admins): the licence-reading AI this credit period. */
+export interface LicenceAiUsage {
+  periodStart: string
+  periodEnd: string
+  /** Licences read this period (each an answer Anthropic billed). */
+  reads: number
+  /** What they cost, counted by the backend from each answer's tokens (Console's Billing page is official). */
+  spentUsd: number
+  budgetUsd: number
+  /** Anthropic refusing our account now: credit, the key, or the model's name; null while it answers. */
+  problem: 'CREDIT' | 'KEY' | 'MODEL' | null
+  problemSince: string | null
+  /** False without ANTHROPIC_API_KEY: nothing is read, every licence waits as "Checking". */
+  keySet: boolean
+  /** Super admins with a verified email: who the alert emails reach (0: nobody). */
+  alertRecipients: number
+}
+
 /** What the AI read from the licence (null where not on it). */
 export interface LicenceRead {
   readable: boolean
