@@ -148,6 +148,13 @@ function matches(ifNoneMatch: string | undefined, etag: string): boolean {
 }
 
 export class MockApi {
+  /** What LicenceCheckJob's AI read from a passed licence. */
+  static readonly licenceRead = {
+    readable: true, tradeLicence: true, looksEdited: false, provisional: false, salonTrade: true,
+    issuingBody: 'Greater Hyderabad Municipal Corporation', licenceNumber: 'TR-0934-422-0003', tradeName: 'Shine Unisex Salon',
+    ownerName: 'Ravi Kumar', address: 'Shop 12, Ithum Tower', pincode: '201309', tradeCategory: 'Saloon', validUntil: '2099-03-31',
+  }
+
   /** How many times a salon video link was signed (each read of a business page signs it again). */
   videoSigs = 0
   user: MockUser = MockApi.completeUser('ADMIN')
@@ -310,7 +317,9 @@ export class MockApi {
         ratingAverage: 4.4,
       } : null,
       registrationDoc: shop.type === 'SALON'
-        ? { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/doc-${shop.id as string}.pdf`, checkedAt: shop.status === 'APPROVED' ? ago(60 * 24) : null }
+        ? shop.status === 'APPROVED'
+          ? { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/doc-${shop.id as string}.pdf`, checkedAt: ago(60 * 24), check: 'PASSED', reason: null, licenceNumber: 'TR-0934-422-0003', validUntil: '2099-03-31', read: MockApi.licenceRead }
+          : { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/doc-${shop.id as string}.pdf`, checkedAt: null, check: 'PENDING', reason: null, licenceNumber: null, validUntil: null, read: null }
         : null,
       changes: [],
       pinMovedMetres: null,
@@ -887,15 +896,20 @@ export class MockApi {
       return ok(200, { moved, stayed })
     }
 
-    if (p === '/admin/shops/documents-to-check' && method === 'GET') {
-      // ShopAdminService.documentsToCheck: super admins; live salons with a document not checked yet
+    if (p === '/admin/shops/licences-to-follow-up' && method === 'GET') {
+      // ShopAdminService.licencesToFollowUp: super admins; not accepted, or waiting over half an hour
       if (!isSuper) return superOnly()
+      const halfHourAgo = Date.now() - 30 * 60_000
       return ok(200, this.shops
-        .filter((s) => s.type === 'SALON' && s.status === 'APPROVED')
-        .filter((s) => { const d = this.extra.get(s.id as string)!.registrationDoc; return d !== null && !d.checkedAt })
+        .filter((s) => s.type === 'SALON' && s.status !== 'CLOSED')
+        .filter((s) => {
+          const d = this.extra.get(s.id as string)!.registrationDoc
+          return d !== null && (d.check === 'FAILED' || (d.check === 'PENDING' && d.since && Date.parse(d.since as string) <= halfHourAgo))
+        })
         .map((s) => this.view(s)))
     }
-    const docPath = p.match(/^\/admin\/shops\/([^/]+)\/registration-document\/(check|remove)$/)
+    // The trade licence is checked automatically now: "recheck" sends it again, "remove" takes it off
+    const docPath = p.match(/^\/admin\/shops\/([^/]+)\/registration-document\/(remove|recheck)$/)
     if (docPath && method === 'POST') {
       const shop = this.shops.find((s) => s.id === docPath[1])
       if (!shop || !this.sees(shop)) return fail(404, 'NOT_FOUND', 'No such shop.')
@@ -904,12 +918,13 @@ export class MockApi {
       if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop changed after you loaded it. Reload and check the new details first.')
       const x = this.extra.get(shop.id as string)!
       if (!x.registrationDoc) return fail(409, 'NO_DOCUMENT', 'This salon has no registration document.')
-      if (docPath[2] === 'remove') {
+      if (docPath[2] === 'recheck') {
+        if (x.registrationDoc.type !== 'TRADE_LICENCE') return fail(409, 'NOT_TRADE_LICENCE', 'Only a trade licence is checked.')
+        x.registrationDoc = { ...x.registrationDoc, check: 'PENDING', reason: null, licenceNumber: null, validUntil: null, read: null, checkedAt: null, since: new Date().toISOString() }
+      } else {
         const problem = textProblem(body.reason, 2, 200)
         if (problem) return invalid({ reason: problem })
         x.registrationDoc = null
-      } else {
-        x.registrationDoc = { ...x.registrationDoc, checkedAt: new Date().toISOString() }
       }
       shop.version = (shop.version as number) + 1
       return ok(200, this.view(shop))
