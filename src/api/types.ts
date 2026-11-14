@@ -213,24 +213,57 @@ export interface SalonFacts {
   ratingAverage?: number | null
 }
 
+/** TRADE_LICENCE; a SHOPS_ESTABLISHMENT or UDYAM one was added before only a trade licence counted (it doesn't now). */
 export type RegistrationDocType = 'SHOPS_ESTABLISHMENT' | 'TRADE_LICENCE' | 'UDYAM'
 
-/** A salon's registration document: for the field team only. */
+/** The automatic check of a salon's trade licence. */
+export type LicenceCheck = 'PENDING' | 'PASSED' | 'FAILED'
+
+/** What the AI read from the licence (null where not on it). */
+export interface LicenceRead {
+  readable: boolean
+  tradeLicence: boolean
+  looksEdited: boolean
+  provisional: boolean
+  salonTrade: boolean
+  issuingBody: string | null
+  licenceNumber: string | null
+  tradeName: string | null
+  ownerName: string | null
+  address: string | null
+  pincode: string | null
+  tradeCategory: string | null
+  validUntil: string | null
+}
+
+/** A salon's trade licence and its automatic check: for the field team only. */
 export interface RegistrationDoc {
   type: RegistrationDocType
   /** e.g. "Trade licence" */
   label: string
   /** A signed link to the photo or PDF (valid at least 15 more minutes); null if the file is gone. */
   url: string | null
-  /** When the field team checked this document (customers then see "Registered"); null: not yet. */
+  /** When it passed the automatic check; null: not (yet). */
   checkedAt?: string | null
+  /** PENDING (being checked, or no AI key set yet), PASSED, FAILED; missing from an older backend. */
+  check?: LicenceCheck | null
+  /** Why it FAILED (e.g. NAME_MISMATCH); null otherwise. */
+  reason?: string | null
+  /** The number it passed with; null otherwise. */
+  licenceNumber?: string | null
+  /** Its last valid day (YYYY-MM-DD) once PASSED: customers see "Licensed" until then. */
+  validUntil?: string | null
+  /** What the AI read from it; null if not read. */
+  read?: LicenceRead | null
+  /** When this check started (a PENDING one has waited since then). */
+  since?: string | null
 }
 
 /** GET /admin/shops/{id} */
 export interface ShopDetail {
   shop: AdminShop
   salon: SalonFacts | null
-  /** A salon's registration document; null if none (kiranas, salons registered before it was asked for). */
+  /** A salon's trade licence; null if none (kiranas, salons without one). */
   registrationDoc?: RegistrationDoc | null
   changes: Change[]
   pinMovedMetres: number | null

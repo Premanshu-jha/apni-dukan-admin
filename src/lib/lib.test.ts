@@ -1,4 +1,5 @@
-import { CHECKLIST, CHECKLIST_LABELS, eventLabel, GROUP_LABELS, GROUPS, isGroup, isShopType, sinceText } from './labels'
+import { CHECKLIST, CHECKLIST_LABELS, checklistFor, eventLabel, GROUP_LABELS, GROUPS, isGroup, isShopType, licenceCheckText, sinceText } from './labels'
+import { dateOnly, todayInIndia } from './time'
 import { directionsUrl, distanceLabel, telUrl } from './links'
 import { formatPhone, normalizePhone } from './phone'
 import { isSuperAdmin, isTeam, roleOf, tabsFor } from './roles'
@@ -53,6 +54,30 @@ describe('groups and labels', () => {
       'Business was shut',
       'Other',
     ])
+  })
+
+  it('offers a salon no GSTIN / Udyam item (a salon has none now); a kirana keeps it', () => {
+    expect(checklistFor('SALON')).not.toContain('GST_UDYAM_MISMATCH')
+    expect(checklistFor('SALON')).toHaveLength(CHECKLIST.length - 1)
+    expect(checklistFor('KIRANA')).toEqual(CHECKLIST)
+  })
+
+  it('says where a trade licence check stands', () => {
+    const passed = { type: 'TRADE_LICENCE', check: 'PASSED', licenceNumber: 'TR-1', validUntil: '2027-03-31' }
+    expect(licenceCheckText(passed, '2027-03-31')).toBe('Passed: TR-1, valid until 31 Mar 2027. Customers see "Licensed".')
+    expect(licenceCheckText(passed, '2027-04-01')).toBe('Passed (TR-1), but expired on 31 Mar 2027: no "Licensed" badge.')
+    expect(licenceCheckText({ type: 'TRADE_LICENCE', check: 'FAILED', reason: 'DUPLICATE' })).toBe(
+      'Not accepted: another salon already has this licence. No "Licensed" badge; the owner was told why.',
+    )
+    expect(licenceCheckText({ type: 'TRADE_LICENCE', check: 'FAILED', reason: 'SOMETHING_NEW' })).toContain('SOMETHING_NEW')
+    expect(licenceCheckText({ type: 'TRADE_LICENCE', check: 'PENDING' })).toMatch(/^Being checked/)
+    const pending = { type: 'TRADE_LICENCE', check: 'PENDING', since: '2026-11-14T04:30:00Z' }
+    expect(licenceCheckText(pending)).toContain('since Sat 14 Nov, 10:00 AM')
+    expect(licenceCheckText(pending, '2026-11-14', Date.parse('2026-11-14T04:30:10Z'))).not.toContain('AI')   // just sent
+    expect(licenceCheckText(pending, '2026-11-14', Date.parse('2026-11-14T05:01:00Z'))).toContain('the AI may be down')
+    expect(licenceCheckText({ type: 'TRADE_LICENCE' })).toMatch(/^Being checked/)   // an older backend
+    expect(dateOnly('2027-03-31')).toBe('31 Mar 2027')
+    expect(todayInIndia(Date.parse('2026-11-14T18:31:00Z'))).toBe('2026-11-15')
   })
 
   it('names timeline events, including the owner editing an approved shop', () => {

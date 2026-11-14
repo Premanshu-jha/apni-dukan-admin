@@ -64,8 +64,8 @@ test('a first visit: photos enlarge, Navigate and Call owner links, details, no 
   await expect(salon).toContainText('10:00 AM – 9:00 PM')
   await expect(salon).toContainText('Hair colour · 60 min')
   await expect(salon).toContainText('from ₹800')
-  const doc = page.getByRole('region', { name: 'Registration document' })
-  await expect(doc).toContainText('Trade licence')
+  const doc = page.getByRole('region', { name: 'Trade licence' })
+  await expect(doc).toContainText('Being checked automatically')
   await expect(doc.getByRole('link', { name: 'Open' })).toHaveAttribute('target', '_blank')
   await page.getByRole('button', { name: 'Front photo, tap to enlarge' }).click()
   const big = page.getByRole('dialog', { name: 'Front photo' })
@@ -504,37 +504,63 @@ test('a salon video that can’t play here offers to open it on its own', async 
   await expect(open).toHaveAttribute('rel', /noopener/)
 })
 
-test('a live salon’s new registration document: listed to check, marked as checked, or removed with a reason', async ({ page, context, api }) => {
-  const salon = api.addShop({ name: 'Shine Unisex Salon', type: 'SALON', status: 'APPROVED' }, {
-    registrationDoc: { type: 'UDYAM', label: 'Udyam certificate', url: `${PHOTOS}/udyam.pdf`, checkedAt: null },
-  })
-  const version = salon.version
-  await page.clock.install()
+test('a salon’s trade licence: what the automatic check decided and read, no manual check, and removable with a reason', async ({ page, context, api }) => {
+  const salon = api.addShop({ name: 'Shine Unisex Salon', type: 'SALON', status: 'APPROVED' })
   await signedIn(context, api, 'SUPER_ADMIN')
+  // No list of documents to check on the dashboard any more
   await page.goto('/?type=SALON')
-  const list = page.getByRole('region', { name: /Registration documents to check: 1/ })
-  await expect(list.getByRole('link', { name: /Shine Unisex Salon/ })).toBeVisible()
-  // A document uploaded while the dashboard is open shows up on the 30-second refresh
-  api.addShop({ name: 'Style Studio', type: 'SALON', status: 'APPROVED' }, {
-    registrationDoc: { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/licence.pdf`, checkedAt: null },
-  })
-  await page.clock.runFor(31_000)
-  await expect(page.getByRole('region', { name: /Registration documents to check: 2/ })).toBeVisible()
-  await page.getByRole('link', { name: /Shine Unisex Salon/ }).click()
+  await expect(page.getByText(/documents to check/i)).toHaveCount(0)
+  await page.goto(`/shops/${salon.id as string}`)
 
-  const doc = page.getByRole('region', { name: 'Registration document' })
-  await expect(doc).toContainText('Not checked yet: customers see "Unregistered" until it is.')
-  await doc.getByRole('button', { name: 'Mark as checked' }).click()
-  await expect(page.getByText('Document marked as checked.')).toBeVisible()
-  await expect(doc).toContainText('customers see "Registered"')
-  expect(api.calls.find((c) => c.path === `/api/v1/admin/shops/${salon.id as string}/registration-document/check`)!.body).toMatchObject({ version })
+  const doc = page.getByRole('region', { name: 'Trade licence' })
+  await expect(doc).toContainText('Passed: TR-0934-422-0003, valid until 31 Mar 2099. Customers see "Licensed".')
+  await expect(doc.getByRole('button', { name: 'Mark as checked' })).toHaveCount(0)
+  await expect(doc.getByRole('button', { name: 'Check again' })).toHaveCount(0)   // it passed
+  await doc.getByText('What the check read from it').click()
+  await expect(doc).toContainText('Shine Unisex Salon')
+  await expect(doc).toContainText('Greater Hyderabad Municipal Corporation')
+  await expect(doc).toContainText('Flagsnone')
 
   await doc.getByRole('button', { name: 'Remove' }).click()
-  await expect(doc.getByRole('button', { name: 'Remove the document' })).toBeDisabled()   // a reason first
-  await doc.getByLabel('Why (the owner is told)').fill('The certificate is for another shop.')
-  await doc.getByRole('button', { name: 'Remove the document' }).click()
-  await expect(page.getByText('Document removed. The owner was told why.')).toBeVisible()
+  await expect(doc.getByRole('button', { name: 'Remove the trade licence' })).toBeDisabled()   // a reason first
+  await doc.getByLabel('Why (the owner is told)').fill('The licence is for another shop.')
+  await doc.getByRole('button', { name: 'Remove the trade licence' }).click()
+  await expect(page.getByText('Trade licence removed. The owner was told why.')).toBeVisible()
   await expect(doc).toContainText('None added')
+  expect(api.calls.find((c) => c.path === `/api/v1/admin/shops/${salon.id as string}/registration-document/remove`)!.body).toMatchObject({ reason: 'The licence is for another shop.' })
+})
+
+test('a licence that wasn’t accepted, an expired one, and an old Udyam certificate say so', async ({ page, context, api }) => {
+  const failed = api.addShop({ name: 'Royal Cuts', type: 'SALON', status: 'APPROVED' }, {
+    registrationDoc: { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/l.pdf`, checkedAt: null, check: 'FAILED', reason: 'NAME_MISMATCH', licenceNumber: null, validUntil: null, read: null },
+  })
+  const expired = api.addShop({ name: 'Old Cuts', type: 'SALON', status: 'APPROVED' }, {
+    registrationDoc: { type: 'TRADE_LICENCE', label: 'Trade licence', url: `${PHOTOS}/e.pdf`, checkedAt: '2025-04-01T05:00:00Z', check: 'PASSED', reason: null, licenceNumber: 'TR-9', validUntil: '2026-03-31', read: null },
+  })
+  const udyam = api.addShop({ name: 'Udyam Cuts', type: 'SALON', status: 'APPROVED' }, {
+    registrationDoc: { type: 'UDYAM', label: 'Udyam certificate', url: `${PHOTOS}/u.pdf`, checkedAt: null, check: 'FAILED', reason: 'NOT_TRADE_LICENCE', licenceNumber: null, validUntil: null, read: null },
+  })
+  await signedIn(context, api, 'SUPER_ADMIN')
+  // The super admins' list of licences to follow up
+  await page.goto('/?type=SALON')
+  const follow = page.getByRole('region', { name: /Trade licences to follow up: 2/ })
+  await expect(follow.getByRole('link', { name: /Royal Cuts/ })).toBeVisible()
+  await expect(follow.getByRole('link', { name: /Udyam Cuts/ })).toBeVisible()
+  await page.goto(`/shops/${failed.id as string}`)
+  await expect(page.getByRole('region', { name: 'Trade licence' })).toContainText("Not accepted: neither the business nor the owner's name matches the salon.")
+  // Sent for checking again (the owner's details were fixed, or the AI misread it)
+  const seen = failed.version
+  await page.getByRole('region', { name: 'Trade licence' }).getByRole('button', { name: 'Check again' }).click()
+  await expect(page.getByText('Sent for checking again.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Trade licence' })).toContainText('Being checked automatically since')
+  expect(api.calls.find((c) => c.path === `/api/v1/admin/shops/${failed.id as string}/registration-document/recheck`)!.body).toMatchObject({ version: seen })
+  await page.goto(`/shops/${expired.id as string}`)
+  await expect(page.getByRole('region', { name: 'Trade licence' })).toContainText('but expired on 31 Mar 2026: no "Licensed" badge.')
+  await page.goto(`/shops/${udyam.id as string}`)
+  await expect(page.getByRole('region', { name: 'Trade licence' })).toContainText('Not accepted: not a municipal trade licence.')
+  await expect(page.getByRole('button', { name: 'Check again' })).toHaveCount(0)   // never sent to the AI
+  // A salon has no GSTIN or Udyam number now: not shown, and not on the visit checklist
+  await expect(page.getByText('GSTIN')).toHaveCount(0)
 })
 
 test('a live salon waiting for its re-check stays live: approving checks its changes, and it is never listed twice', async ({ page, context, api }) => {
@@ -543,7 +569,7 @@ test('a live salon waiting for its re-check stays live: approving checks its cha
     {
       approvedBefore: true,
       rechecking: true,
-      changes: [{ field: 'gstin', label: 'GSTIN', before: null, after: '27AAPFU0939F1ZV' }],
+      changes: [{ field: 'shopPhoto', label: "Shop's photo", before: null, after: null }],
     },
   )
   await signedIn(context, api)
@@ -577,7 +603,7 @@ test('a field agent asks the owner to fix a live salon’s re-check: it stays li
   await expect(page.getByRole('button', { name: 'Send back', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Ask the owner to fix', exact: true }).click()
-  await page.getByRole('dialog').getByLabel('Reason for the owner').fill('The GSTIN doesn’t match the certificate.')
+  await page.getByRole('dialog').getByLabel('Reason for the owner').fill('The board in the shop photo is not readable.')
   await page.getByRole('dialog').getByRole('button', { name: 'Ask the owner to fix' }).click()
   await expect(page.getByText('Sent to the owner. The business stays live and waits here until you approve it.')).toBeVisible()
   expect(shop.status).toBe('APPROVED')

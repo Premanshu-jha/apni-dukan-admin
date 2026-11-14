@@ -3,7 +3,7 @@ import { adminApi } from '../../api/admin'
 import { explain, fieldError, isApiError, isNetwork } from '../../api/errors'
 import type { AdminShop, ChecklistItem, TimelineEntry } from '../../api/types'
 import { Banner, Button, Sheet, TextArea } from '../../components/ui'
-import { CHECKLIST, CHECKLIST_LABELS } from '../../lib/labels'
+import { CHECKLIST_LABELS, checklistFor } from '../../lib/labels'
 import {
   checkDecision,
   checkNote,
@@ -115,7 +115,7 @@ export function DecisionSheet({
         {withReason && (
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-2 text-sm font-medium text-muted">What was wrong (tick all that apply)</legend>
-            {CHECKLIST.map((c) => (
+            {checklistFor(shop.type).map((c) => (
               <label key={c} className="flex min-h-11 items-center gap-3 rounded-xl border border-line px-3">
                 <input
                   type="checkbox"

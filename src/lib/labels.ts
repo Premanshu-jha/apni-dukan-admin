@@ -1,4 +1,4 @@
-import { howLong } from './time'
+import { dateOnly, dateTimeIst, howLong, todayInIndia } from './time'
 import type { AdminRole, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry, Designation } from '../api/types'
 
 export const SHOP_TYPES: ShopType[] = ['KIRANA', 'SALON']
@@ -75,6 +75,52 @@ export const CHECKLIST: ChecklistItem[] = [
   'SHOP_SHUT',
   'OTHER',
 ]
+
+/** The checklist offered for a business: a salon has no GSTIN or Udyam number now, so no "doesn't match" for them. */
+export function checklistFor(type: ShopType): ChecklistItem[] {
+  return type === 'SALON' ? CHECKLIST.filter((c) => c !== 'GST_UDYAM_MISMATCH') : CHECKLIST
+}
+
+/** Why a trade licence wasn't accepted (LicenceCheckReason on the backend), for the field team. */
+export const LICENCE_REASON_LABELS: Record<string, string> = {
+  UNREADABLE: 'too blurred or cut off to read',
+  NOT_TRADE_LICENCE: 'not a municipal trade licence',
+  LOOKS_EDITED: 'looks edited',
+  NO_NUMBER: 'no licence number found',
+  NOT_A_SALON_TRADE: 'a licence for another trade',
+  NO_VALIDITY: 'no "valid up to" date found',
+  EXPIRED: 'expired',
+  NAME_MISMATCH: "neither the business nor the owner's name matches the salon",
+  ADDRESS_MISMATCH: "the address doesn't match the salon's",
+  DUPLICATE: 'another salon already has this licence',
+  NOT_READ: 'the AI gave no usable answer three times',
+}
+
+/** Where a salon's trade licence check stands, in a sentence for the field team. */
+export function licenceCheckText(doc: {
+  type: string
+  check?: string | null
+  reason?: string | null
+  licenceNumber?: string | null
+  validUntil?: string | null
+  since?: string | null
+}, today: string = todayInIndia(), now: number = Date.now()): string {
+  if (doc.check === 'PASSED') {
+    const until = doc.validUntil ? dateOnly(doc.validUntil) : '?'
+    return doc.validUntil && doc.validUntil < today
+      ? `Passed (${doc.licenceNumber ?? 'no number'}), but expired on ${until}: no "Licensed" badge.`
+      : `Passed: ${doc.licenceNumber ?? 'no number'}, valid until ${until}. Customers see "Licensed".`
+  }
+  if (doc.check === 'FAILED') {
+    const why = doc.reason ? (LICENCE_REASON_LABELS[doc.reason] ?? doc.reason) : 'no reason given'
+    return `Not accepted: ${why}. No "Licensed" badge; the owner was told why.`
+  }
+  const since = doc.since ? ` since ${dateTimeIst(doc.since)}` : ''
+  // Usually under a minute; past half an hour (as the follow-up list) the AI is likely down or its key isn't set
+  const long = doc.since != null && now - Date.parse(doc.since) > 30 * 60_000
+  const why = long ? " (a long wait: the AI may be down or its key isn't set)" : ''
+  return `Being checked automatically${since}${why}. No "Licensed" badge yet.`
+}
 
 export const CHECKLIST_LABELS: Record<ChecklistItem, string> = {
   NAME_BOARD_NOT_VISIBLE: "Photo doesn't show the name board",
