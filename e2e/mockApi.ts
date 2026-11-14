@@ -172,6 +172,8 @@ export class MockApi {
   otherPhones = new Set<string>(['9811122233'])
   /** Verified emails of accounts not on the team: 409 EMAIL_IN_USE. */
   otherEmails = new Set<string>(['owner@gmail.com'])
+  /** GET /admin/shops/licence-ai-usage (LicenceAiWatch.usage): tests set what the AI has cost and any refusal. */
+  licenceAi: Json = { periodStart: '2026-11-04', periodEnd: '2026-12-03', reads: 120, spentUsd: 1.2, budgetUsd: 100, problem: null, problemSince: null, keySet: true, alertRecipients: 1 }
   testMode: { on: boolean; until: string | null; turnedOnByName: string | null } = { on: false, until: null, turnedOnByName: null }
   testPhones: Json[] = []
   testEmails: Json[] = []
@@ -896,6 +898,10 @@ export class MockApi {
       return ok(200, { moved, stayed })
     }
 
+    if (p === '/admin/shops/licence-ai-usage' && method === 'GET') {
+      if (!isSuper) return superOnly()   // ShopAdminService.licenceAiUsage: 403 SUPER_ADMIN_ONLY for other admins
+      return ok(200, this.licenceAi)
+    }
     if (p === '/admin/shops/licences-to-follow-up' && method === 'GET') {
       // ShopAdminService.licencesToFollowUp: super admins; not accepted, or waiting over half an hour
       if (!isSuper) return superOnly()

@@ -612,3 +612,47 @@ test('a field agent asks the owner to fix a live salon’s re-check: it stays li
   // Still waiting: Approve when it is right
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
 })
+
+test('super admins see what the licence checks cost this month, and a stop in red on both tabs; field agents see none of it', async ({ page, context, api }) => {
+  await signedIn(context, api, 'SUPER_ADMIN')
+  await page.goto('/?type=SALON')
+  const ai = page.getByRole('region', { name: 'Licence checks (AI)' })
+  await expect(ai).toContainText('4 Nov 2026 to 3 Dec 2026: 120 licences read, $1.20 of $100.00 (1%)')
+  await expect(ai.getByRole('alert')).toHaveCount(0)
+  // The kirana tab: nothing while the checks work
+  await page.goto('/?type=KIRANA')
+  await expect(page.getByRole('region', { name: 'Licence checks (AI)' })).toHaveCount(0)
+  // Out of credit: said on the tab Businesses opens on too, with where to fix it (refreshed by itself)
+  api.licenceAi = { ...api.licenceAi, reads: 8000, spentUsd: 100.004, problem: 'CREDIT', problemSince: '2026-11-20T04:30:00Z' }
+  await page.reload()
+  const stop = page.getByRole('region', { name: 'Licence checks (AI)' }).getByRole('alert')
+  await expect(stop).toContainText('Licence checks are stopped since Fri 20 Nov, 10:00 AM: Anthropic refuses for the API credit.')
+  await expect(stop.getByRole('link', { name: 'Open Billing in the Claude Console' })).toHaveAttribute('href', 'https://platform.claude.com/settings/billing')
+  await page.goto('/?type=SALON')
+  await expect(ai).toContainText('$100.00 of $100.00 (100%)')
+  // No super admin with an email: nobody would get the alerts
+  api.licenceAi = { ...api.licenceAi, problem: null, problemSince: null, alertRecipients: 0 }
+  await page.reload()
+  await expect(ai).toContainText('No super admin has a verified email')
+  await page.goto('/?type=KIRANA')   // where Businesses opens
+  await expect(page.getByRole('region', { name: 'Licence checks (AI)' })).toContainText('No super admin has a verified email')
+})
+
+test('the licence checks\u2019 cost that can\u2019t be read says so, with Try again', async ({ page, context, api }) => {
+  await signedIn(context, api, 'SUPER_ADMIN')
+  // 4xx answers are not retried: shown at once
+  api.failOnce.set('/admin/shops/licence-ai-usage', { status: 400, code: 'BAD', message: 'It could not be read.' })
+  await page.goto('/?type=SALON')
+  const ai = page.getByRole('region', { name: 'Licence checks (AI)' })
+  await expect(ai).toContainText("Couldn't read what the licence checks cost: It could not be read.")
+  await ai.getByRole('button', { name: /Try again/ }).click()
+  await expect(ai).toContainText('120 licences read')
+})
+
+test('a field agent never asks for the licence checks’ cost', async ({ page, context, api }) => {
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/?type=SALON')
+  await expect(page.getByRole('heading', { name: /Businesses/ })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Licence checks (AI)' })).toHaveCount(0)
+  expect(api.calls.some((c) => c.path.endsWith('/admin/shops/licence-ai-usage'))).toBe(false)
+})
