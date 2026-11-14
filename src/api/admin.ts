@@ -8,6 +8,7 @@ import type {
   Covered,
   Dashboard,
   DecisionIn,
+  LicenceAiUsage,
   MemberIn,
   Moved,
   ShopDetail,
@@ -90,6 +91,8 @@ export const adminApi = {
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/recheck`, { version }),
   /** Super admins: salons whose licence wasn't accepted, or has waited over half an hour, longest first (≤ 100). */
   licencesToFollowUp: () => api<AdminShop[]>('GET', `${A}/shops/licences-to-follow-up`),
+  /** Super admins: what the licence checks' AI has cost this credit period, and whether Anthropic refuses us. */
+  licenceAiUsage: () => api<LicenceAiUsage>('GET', `${A}/shops/licence-ai-usage`),
   /** Take a wrong or someone else's trade licence off the salon, with the reason the owner is told ("Licensed" goes). */
   removeDocument: (id: string, version: number, reason: string) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/remove`, { version, reason }),
@@ -173,6 +176,7 @@ export const adminApi = {
 
 export const keys = {
   licencesToFollowUp: ['admin', 'shops', 'licences-to-follow-up'] as const,
+  licenceAiUsage: ['admin', 'shops', 'licence-ai-usage'] as const,
   all: ['admin'] as const,
   me: ['admin', 'me'] as const,
   dashboard: ['admin', 'dashboard'] as const,
@@ -245,6 +249,10 @@ export function useShopList(type: ShopType, group: ShopGroup, q: string, who: Sh
 /** The super admins' licences to follow up (Businesses → Salon), refreshed like the lists. */
 export function useLicencesToFollowUp(enabled: boolean) {
   return useQuery({ queryKey: keys.licencesToFollowUp, queryFn: adminApi.licencesToFollowUp, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
+}
+
+export function useLicenceAiUsage(enabled: boolean) {
+  return useQuery({ queryKey: keys.licenceAiUsage, queryFn: adminApi.licenceAiUsage, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
 }
 
 export function useShopDetail(id: string) {
