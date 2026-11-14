@@ -85,12 +85,12 @@ export const adminApi = {
     ),
   decide: (id: string, decision: Decision, body: DecisionIn) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
-  /** Super admins: live salons with a new registration document to check, oldest change first (at most 100). */
-  documentsToCheck: () => api<AdminShop[]>('GET', `${A}/shops/documents-to-check`),
-  /** The document was checked: customers see "Registered". */
-  checkDocument: (id: string, version: number) =>
-    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/check`, { version }),
-  /** Take a wrong or expired document off the salon, with the reason the owner is told. */
+  /** Send the salon's trade licence for the automatic check again (its details were fixed, or the AI got it wrong). */
+  recheckLicence: (id: string, version: number) =>
+    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/recheck`, { version }),
+  /** Super admins: salons whose licence wasn't accepted, or has waited over half an hour, longest first (≤ 100). */
+  licencesToFollowUp: () => api<AdminShop[]>('GET', `${A}/shops/licences-to-follow-up`),
+  /** Take a wrong or someone else's trade licence off the salon, with the reason the owner is told ("Licensed" goes). */
   removeDocument: (id: string, version: number, reason: string) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/remove`, { version, reason }),
   /** Refuse the owner's waiting address change request, with the reason he is told (Approve applies it instead). */
@@ -172,6 +172,7 @@ export const adminApi = {
 }
 
 export const keys = {
+  licencesToFollowUp: ['admin', 'shops', 'licences-to-follow-up'] as const,
   all: ['admin'] as const,
   me: ['admin', 'me'] as const,
   dashboard: ['admin', 'dashboard'] as const,
@@ -187,7 +188,6 @@ export const keys = {
   team: ['admin', 'team'] as const,
   coverage: ['admin', 'team', 'coverage'] as const,
   testMode: ['admin', 'test-mode'] as const,
-  documentsToCheck: ['admin', 'shops', 'documents-to-check'] as const,
   tickets: ['admin', 'tickets'] as const,
   ticketList: (view: TicketView, assignee: string | null) => ['admin', 'tickets', 'list', view, assignee] as const,
   ticketCounts: ['admin', 'tickets', 'counts'] as const,
@@ -205,10 +205,6 @@ export const LIST_REFRESH_MS = 30_000
 
 /** Pages of a shop list kept fresh on the timer: beyond this, re-reading every loaded page each time costs too much. */
 const REFRESHED_PAGES = 2
-
-export function useDocumentsToCheck(enabled: boolean) {
-  return useQuery({ queryKey: keys.documentsToCheck, queryFn: adminApi.documentsToCheck, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
-}
 
 /** Who is signed in and whether test mode is on. Re-read every minute and on focus, so the banner stays true. */
 export function useMe() {
@@ -246,6 +242,11 @@ export function useShopList(type: ShopType, group: ShopGroup, q: string, who: Sh
  * A shop's page. Its photo links last a few minutes, so it is re-read every 4 minutes while open (not every 30
  * seconds like the lists: each read signs new links, so the photos would load again and a playing video restart).
  */
+/** The super admins' licences to follow up (Businesses → Salon), refreshed like the lists. */
+export function useLicencesToFollowUp(enabled: boolean) {
+  return useQuery({ queryKey: keys.licencesToFollowUp, queryFn: adminApi.licencesToFollowUp, enabled, staleTime: 10_000, refetchInterval: LIST_REFRESH_MS })
+}
+
 export function useShopDetail(id: string) {
   return useQuery({ queryKey: keys.shop(id), queryFn: () => adminApi.shop(id), refetchInterval: 4 * 60_000 })
 }
