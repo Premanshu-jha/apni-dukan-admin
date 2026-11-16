@@ -160,6 +160,12 @@ export class MockApi {
   user: MockUser = MockApi.completeUser('ADMIN')
   calls: Call[] = []
   shops: Json[] = []
+  /** salon_subscriptions by shop id: a salon's free trial end (set at its first approval) and paid month. */
+  subscriptions = new Map<string, { trialEndsAt: string; paidUntil: string | null; status: string | null }>()
+  /** Salons whose owner signed in with an OTP test number (ShopAdminService.endTrialNow allows only these). */
+  testSalons = new Set<string>()
+  /** SUBSCRIPTIONS_ENFORCED: unpaid salons really hidden. */
+  subscriptionsEnforced = false
   extra = new Map<string, ShopExtra>()
   /** Shops (ids) the signed-in admin works in (owner, helper or barber): decisions and notes answer 403 OWN_SHOP. */
   memberOf = new Set<string>()
@@ -913,6 +919,46 @@ export class MockApi {
           return d !== null && (d.check === 'FAILED' || (d.check === 'PENDING' && d.since && Date.parse(d.since as string) <= halfHourAgo))
         })
         .map((s) => this.view(s)))
+    }
+    // A salon's subscription (ShopAdminController): anyone who sees the salon reads it; a super admin ends a test salon's trial
+    const subPath = p.match(/^\/admin\/shops\/([^/]+)\/subscription(\/end-trial)?$/)
+    if (subPath) {
+      const shop = this.shops.find((s) => s.id === subPath[1])
+      if (!shop || !this.sees(shop)) return fail(404, 'NOT_FOUND', 'No such shop.')
+      const view = () => {
+        const s = this.subscriptions.get(shop.id as string)
+        const base = { pricePerMonth: 500, enforced: this.subscriptionsEnforced, paymentsReady: true, testMode: true, canPay: false }
+        if (!s) {
+          return { state: 'NONE', trialEndsAt: null, paidUntil: null, accessUntil: null, hiddenFrom: null, razorpayStatus: null, autoPayFailed: false, testSalon: false, ...base }
+        }
+        const trial = Date.parse(s.trialEndsAt)
+        const access = Math.max(trial, s.paidUntil ? Date.parse(s.paidUntil) : 0)
+        // SubscriptionStore.bookableAfter: midnight (India time) ending the third day after access
+        const ist = 5.5 * 3_600_000
+        const hidden = (Math.floor((access + 3 * 86_400_000 + ist) / 86_400_000) + 1) * 86_400_000 - ist
+        const now = Date.now()
+        const setUp = s.status === 'AUTHENTICATED' || s.status === 'ACTIVE'
+        const autoPay = setUp && now < access + 86_400_000
+        const state = autoPay ? 'AUTOPAY' : now < access ? (s.paidUntil && Date.parse(s.paidUntil) > trial ? 'PAID' : 'TRIAL') : now < hidden ? 'GRACE' : 'HIDDEN'
+        return {
+          state, trialEndsAt: s.trialEndsAt, paidUntil: s.paidUntil, accessUntil: new Date(access).toISOString(), hiddenFrom: new Date(hidden).toISOString(),
+          razorpayStatus: s.status, autoPayFailed: s.status === 'PENDING' || s.status === 'HALTED' || (setUp && !autoPay),
+          testSalon: this.testSalons.has(shop.id as string), ...base,
+        }
+      }
+      if (!subPath[2] && method === 'GET') return ok(200, view())
+      if (subPath[2] && method === 'POST') {
+        if (!isSuper) return superOnly()
+        const s = this.subscriptions.get(shop.id as string)
+        // SubscriptionService.endTrialNow: the trial ends now; what was paid and AutoPay stay (an unapproved checkout goes)
+        if (!s) return fail(409, 'SUBSCRIPTION_NOT_STARTED', "Your salon's free trial starts when our field team approves it. Nothing to pay until then.")
+        if (!this.testSalons.has(shop.id as string)) {
+          return fail(409, 'NOT_A_TEST_SALON', 'Only a test salon (its owner signed in with an OTP test number) can have its trial ended.')
+        }
+        s.trialEndsAt = new Date().toISOString()
+        if (s.status === 'CREATED') s.status = null
+        return ok(200, view())
+      }
     }
     // The trade licence is checked automatically now: "recheck" sends it again, "remove" takes it off
     const docPath = p.match(/^\/admin\/shops\/([^/]+)\/registration-document\/(remove|recheck)$/)
