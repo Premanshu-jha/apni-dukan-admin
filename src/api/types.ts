@@ -522,3 +522,27 @@ export interface TicketStats {
   people: Array<{ userId: string; name: string; support: boolean; open: number; waiting: number; resolved: number }>
   unassigned: number
 }
+
+/**
+ * A salon's subscription (GET /admin/shops/{id}/subscription, SubscriptionService.View): ₹500 a month after a 30-day
+ * free trial from its first approval.
+ */
+export interface SalonSubscription {
+  /** NONE (not approved yet), AUTOPAY, TRIAL, PAID (paid up, AutoPay off), GRACE (ended, 3 days to pay), HIDDEN */
+  state: 'NONE' | 'AUTOPAY' | 'TRIAL' | 'PAID' | 'GRACE' | 'HIDDEN'
+  trialEndsAt: string | null
+  paidUntil: string | null
+  accessUntil: string | null
+  hiddenFrom: string | null
+  razorpayStatus: string | null
+  pricePerMonth: number
+  /** Whether lapsed salons are really hidden (SUBSCRIPTIONS_ENFORCED) */
+  enforced: boolean
+  paymentsReady: boolean
+  testMode: boolean
+  /** The last AutoPay charge failed or is overdue */
+  autoPayFailed?: boolean
+  /** Its owner is an OTP test account: a super admin may end its trial (Razorpay's review) */
+  testSalon?: boolean
+}
+
