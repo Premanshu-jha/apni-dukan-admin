@@ -247,11 +247,11 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 
 | # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |
 | --- | --- | --- | --- | --- | --- | --- |
-| 221 | A support person signs in | `/admin/me` designation SUPPORT; `/admin/tickets` 200 | Lands on "My tickets"; tabs Tickets and More only | HelpdeskIT.aSupportPersonIsAddedWithoutPincodesAndSeesOnlyTickets | e2e:tickets "a support person sees only their tickets…" | OK-tested |
+| 221 | A salon's page | GET /admin/shops/{id}/subscription → 200 (state, dates, Razorpay status, autoPayFailed, testSalon) | "Subscription" section: state and ₹500 a month, trial end, paid until, Razorpay's status in words ("last AutoPay charge failed, Razorpay retrying"…) | SubscriptionIntegrationTest (admin view) | e2e:subscription "a salon's page shows…" | OK-tested |
 | 222 | A support person types a business, team or strikes address | `/admin/dashboard`, `/admin/shops` 404; `/admin/team` 403 | Taken to their tickets; no business call is made | HelpdeskIT.aSupportPersonIsAdded… | e2e:tickets "a support person sees only…" | OK-tested |
 | 223 | A field agent types `/tickets` | `/admin/tickets` 404 | Taken to the dashboard | HelpdeskIT.aFieldAgentAndACustomerCantSeeTickets | e2e:super "a field agent has no Support…" | OK-tested |
-| 224 | A new ticket from an app or an email | assigned to the support person with fewest open (random on a tie); ack email queued | Appears in their list within 30 s; the tab badge counts it | HelpdeskIT.aCustomersQuestionGoesToTheSupportPerson…, eachTicketGoesToWhoeverHasFewestOpen, ticketsArrivingTogetherAreSpreadEvenly | e2e:tickets | OK-tested |
-| 225 | Nobody in support yet | ticket Unassigned | Super admin: "N unassigned: show them"; By person says to add a support person | HelpdeskIT.withNobodyInSupportTicketsWaitInUnassigned… | e2e:tickets "super admin: counts per person…" | OK-tested |
+| 224 | Super admin ends a test salon's trial (Razorpay's reviewer) | POST …/subscription/end-trial → 200; a checkout opened before is dropped; a NOTE on the salon's timeline | Button only for a test salon in its trial; asks first; "Trial ended: the test number now sees the payment screen."; state "Not paid: would be hidden after <day>"; button gone | SubscriptionIntegrationTest (admin end-trial, then a new checkout charged today) | e2e:subscription "a super admin ends…" | OK-tested |
+| 225 | A real salon (owner not a test number) | 409 NOT_A_TEST_SALON | No End trial button at all | SubscriptionIntegrationTest (409) | e2e:subscription (no button on a real salon) | OK-tested |
 | 226 | Who asked | `profile`: Account (name, phone, email, since), Business, Latest bookings; `PROFILE_VIEWED` logged once per half hour | "Who asked" card with each section; an unknown email says there's no profile | HelpdeskIT.aCustomersQuestion…, anEmailFromAnUnknownAddress…, anEmailFromAVerifiedAddressIsMatched… | e2e:tickets "a ticket shows who asked…" | OK-tested |
 | 227 | Reply | `POST …/reply {seenSeq, body}` → WAITING; email queued | "Sent. They get your reply by email."; "An email to them is on its way." | HelpdeskIT.theSupportPersonRepliesAndResolves… | e2e:tickets "they wrote again…" (second send) | OK-tested |
 | 228 | Send & resolve | `resolve: true` → RESOLVED; email says how to reopen | "Sent and resolved…"; box label "Reply (opens it again)" | HelpdeskIT.theSupportPersonRepliesAndResolves… | e2e:tickets "a ticket shows who asked…" | OK-tested |
@@ -396,3 +396,17 @@ nobody covers it: Unassigned. Every assignment is logged (`shop_assignments`) an
 | 218 | Driving to the new address | n/a | Navigate there (directions to the new pin) next to New pin; Navigate stays the pin on record | — | e2e:address "Change address can start…" | OK-tested |
 | 219 | Declining when the address was the only change | the business stops waiting for a re-check | Leaves the Re-check list; the owner gets only the decline | AdminIT.theOwnerAsksForANewAddress… | — | OK-tested (backend) |
 | 220 | Suspending a business with a request waiting | the request is cancelled | The card goes | AdminIT.theOwnerAsksForANewAddress… | — | OK-tested (backend) |
+
+## Salon subscription
+
+| # | Scenario | What the API answers | What the screen shows | Backend test | App test | Verdict |
+|---|---|---|---|---|---|---|
+| 221 | A salon's page | GET /admin/shops/{id}/subscription → 200 (state, dates, Razorpay status) | "Subscription" section: state and ₹500 a month, trial end, paid until, when it would be hidden ("not enforced yet" before live payments), Razorpay status | SubscriptionIntegrationTest (admin view) | e2e:subscription "a salon's page shows…" | OK-tested |
+| 222 | A kirana's page | — | No subscription section | — | e2e:subscription "a shop that isn't a salon…" | OK-tested |
+| 223 | An ordinary admin | End trial → 403 SUPER_ADMIN_ONLY | No "End trial now" button | SubscriptionIntegrationTest (roles) | e2e:subscription (no button) | OK-tested |
+| 224 | Super admin ends a test salon's trial (Razorpay's reviewer) | POST …/subscription/end-trial → 200; a NOTE on the salon's timeline | Asks first; "Trial ended: the test number now sees the payment screen."; state "Ended: 3 days to pay"; button gone | SubscriptionIntegrationTest (admin end-trial) | e2e:subscription "a super admin ends…" | OK-tested |
+| 225 | Super admin tries a real salon | 409 NOT_A_TEST_SALON | "Only a test salon's trial can be ended (its owner signed in with an OTP test number)."; nothing changes | SubscriptionIntegrationTest (409) | e2e:subscription | OK-tested |
+| 226 | A salon not approved yet | 200 NONE | "Not started (starts at its first approval)"; no button | — | unit (labels) | OK-untested |
+| 227 | An unpaid salon, hiding on | 200 HIDDEN, autoPayFailed | "Not paid: hidden from customers"; "The last AutoPay payment didn't go through." | SubscriptionIntegrationTest | e2e:subscription "an unpaid salon says…" | OK-tested |
+| 228 | The subscription fails to load | network error | "Couldn't load the subscription: …" with Try again (the section doesn't just vanish) | — | e2e:subscription "…failing to load says so" | OK-tested |
+

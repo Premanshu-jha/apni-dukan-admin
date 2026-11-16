@@ -244,6 +244,18 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### 0.18.0 — 2026-11-16
+
+Needs the backend with V65 (the salon subscription). Deploy the backend first.
+
+- **Subscription on a salon's page**: its state in words (free trial, paid, AutoPay on, "not paid: hidden after
+  <day>", "not paid: hidden from customers"), ₹500 a month, the trial end, paid-until, a failed AutoPay payment, and
+  Razorpay's status in plain words ("last AutoPay charge failed, Razorpay retrying"). A failed load says so with Try
+  again.
+- **Super admins: "End trial now (test salon)"**, shown only for a salon in its trial whose owner signed in with an OTP
+  test number, so Razorpay's reviewer reaches the payment screen. It asks first, is noted on the salon's timeline, and
+  says what happened from the answer.
+
 ### 0.17.0 — 2026-11-14
 
 Needs the backend with V59 (credit alerts for the licence checks). Deploy the backend first.
