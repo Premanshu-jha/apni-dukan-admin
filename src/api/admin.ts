@@ -27,6 +27,7 @@ import type {
   TimelinePage,
   AwayChange,
   AwayEntry,
+  SalonSubscription,
 } from './types'
 import type { Decision } from '../lib/rules'
 
@@ -87,6 +88,9 @@ export const adminApi = {
   decide: (id: string, decision: Decision, body: DecisionIn) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/${decision}`, body),
   /** Send the salon's trade licence for the automatic check again (its details were fixed, or the AI got it wrong). */
+  subscription: (id: string) => api<SalonSubscription>('GET', `${A}/shops/${encodeURIComponent(id)}/subscription`),
+  /** Super admins: a test salon's free trial ends now (for Razorpay's reviewer). */
+  endTestTrial: (id: string) => write<SalonSubscription>('POST', `${A}/shops/${encodeURIComponent(id)}/subscription/end-trial`),
   recheckLicence: (id: string, version: number) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/recheck`, { version }),
   /** Super admins: salons whose licence wasn't accepted, or has waited over half an hour, longest first (≤ 100). */
@@ -184,6 +188,7 @@ export const keys = {
   shopList: (type: ShopType, group: ShopGroup, q: string, who: ShopFilter = 'ALL') =>
     ['admin', 'shops', type, group, q.trim(), who] as const,
   shop: (id: string) => ['admin', 'shop', id] as const,
+  subscription: (id: string) => ['admin', 'shop', id, 'subscription'] as const,
   /** Every shop page at once (an assignment or a Team change may change who visits any of them). */
   shopPages: ['admin', 'shop'] as const,
   /** Outside ['admin', 'shop', id]: refreshing the shop page doesn't ask the earlier entries again. */

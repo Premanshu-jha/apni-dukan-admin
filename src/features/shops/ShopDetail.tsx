@@ -5,6 +5,7 @@ import { adminApi, keys, useEarlierTimeline, useShopDetail } from '../../api/adm
 import { useAdmin } from '../../app/guards'
 import { isSuperAdmin } from '../../lib/roles'
 import { AssignSheet } from './AssignSheet'
+import { SubscriptionSection } from './SubscriptionSection'
 import { AddressRequestCard, ChangeAddress } from './AddressSection'
 import { ADMIN_MESSAGES, explain, isApiError, isNetwork, wrongStatusText } from '../../api/errors'
 import type {
@@ -275,6 +276,8 @@ export function ShopDetail() {
       </section>
 
       {shop.type === 'SALON' && <SalonVideo url={data.videoUrl ?? null} />}
+
+      {shop.type === 'SALON' && <SubscriptionSection shopId={shop.id} superAdmin={superAdmin} />}
 
       {shop.type === 'SALON' && (
         <RegistrationDocument
