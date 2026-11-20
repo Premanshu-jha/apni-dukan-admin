@@ -77,7 +77,10 @@ export interface AdminShop {
   longitude: number
   type: ShopType
   status: ShopStatus
+  /** The team's words to the owner (a send back, fix asked for or suspension); null when none (also with ticks only). */
   statusReason: string | null
+  /** The reasons ticked with a send back or fix asked for (the owner reads each in their language); empty when none. */
+  statusReasonCodes: ReviewReason[]
   /** Links valid a few minutes. */
   ownerPhotoUrl: string | null
   shopPhotoUrl: string | null
@@ -99,6 +102,8 @@ export interface AdminShop {
   waitingForVisit?: boolean
   /** The owner asked for a new address and it waits for the field team (Approve applies it). */
   addressRequested?: boolean
+  /** The language the owner reads (saved in the app); null if not chosen (missing from an older backend). */
+  ownerLanguage?: Language | null
 }
 
 /** A new address and pin, as the owner asks for it or the field team sets it. */
@@ -118,6 +123,8 @@ export interface AddressRequest extends AddressIn {
   reason: string | null
   createdAt: string
   decidedAt: string | null
+  /** The language the person who asked reads; null if not chosen (missing from an older backend). */
+  requesterLanguage?: Language | null
 }
 
 export interface Assignee {
@@ -149,6 +156,29 @@ export interface Change {
   after: string | null
 }
 
+/** The app languages a person can choose (users.language). */
+export type Language = 'en' | 'hi' | 'te' | 'mr' | 'ta' | 'kn'
+
+/**
+ * Why the team sends a business back, asks for a fix or declines an address (ReviewReason on the backend). The owner
+ * sees each one in their language; OTHER needs a note.
+ */
+export type ReviewReason =
+  | 'SHOP_FRONT_PHOTO'
+  | 'BOARD_NOT_VISIBLE'
+  | 'INSIDE_PHOTOS'
+  | 'LICENCE_UNREADABLE'
+  | 'LICENCE_NAME_MISMATCH'
+  | 'LICENCE_EXPIRED'
+  | 'LICENCE_WRONG_TYPE'
+  | 'ADDRESS_WRONG'
+  | 'PIN_WRONG_PLACE'
+  | 'SERVICES_MISSING'
+  | 'HOURS_MISSING'
+  | 'VIDEO_UNCLEAR'
+  | 'OWNER_NAME'
+  | 'OTHER'
+
 export type ChecklistItem =
   | 'NAME_BOARD_NOT_VISIBLE'
   | 'OWNER_PHOTO_UNCLEAR'
@@ -177,8 +207,10 @@ export interface TimelineEntry {
   /** null = the owner or the system. */
   byName: string | null
   byAdmin: boolean
-  /** What the owner saw. */
+  /** What the owner saw in the team's words (the note under the ticked reasons); null when none. */
   reason: string | null
+  /** The reasons ticked (a send back, fix asked for or address declined); empty when none. */
+  reasonCodes: ReviewReason[]
   /** Admins only. */
   note: string | null
   checklist: ChecklistItem[]
@@ -312,9 +344,22 @@ export interface TimelinePage {
 
 export interface DecisionIn {
   version: number
+  /** What the owner is told: needed for Suspend; for Send back and Ask to fix, an optional note beside reasonCodes. */
   reason?: string
+  /** Internal note: admins only. */
   note?: string
   checklist?: ChecklistItem[]
+  /** Send back and Ask to fix: at least one. */
+  reasonCodes?: ReviewReason[]
+}
+
+/** POST /admin/shops/{id}/address-request/decline */
+export interface AddressDeclineIn {
+  version: number
+  /** At least one. */
+  reasonCodes: ReviewReason[]
+  /** An optional note for the owner (needed with OTHER). */
+  reason?: string
 }
 
 // ---------- support ----------
@@ -481,6 +526,8 @@ export interface ProfileSection {
 export interface TicketDetail {
   ticket: TicketSummary
   requesterId: string | null
+  /** The language the person reads (their saved app language); null if not chosen or no account. */
+  requesterLanguage?: Language | null
   /** Where replies go; null once they deleted their account. */
   requesterEmail: string | null
   messages: TicketMessage[]

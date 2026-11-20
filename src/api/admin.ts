@@ -2,6 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-qu
 import { api } from './client'
 import { ApiError } from './errors'
 import type {
+  AddressDeclineIn,
   AddressIn,
   AdminMe,
   AdminShop,
@@ -100,9 +101,9 @@ export const adminApi = {
   /** Take a wrong or someone else's trade licence off the salon, with the reason the owner is told ("Licensed" goes). */
   removeDocument: (id: string, version: number, reason: string) =>
     write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/registration-document/remove`, { version, reason }),
-  /** Refuse the owner's waiting address change request, with the reason he is told (Approve applies it instead). */
-  declineAddressRequest: (id: string, version: number, reason: string) =>
-    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/address-request/decline`, { version, reason }),
+  /** Refuse the owner's waiting address change request, with the reasons he is told (Approve applies it instead). */
+  declineAddressRequest: (id: string, body: AddressDeclineIn) =>
+    write<AdminShop>('POST', `${A}/shops/${encodeURIComponent(id)}/address-request/decline`, body),
   /** Set the business's address and pin (no re-check: the field team checked it); the owner is told. */
   changeAddress: (id: string, version: number, address: AddressIn) =>
     write<AdminShop>('PATCH', `${A}/shops/${encodeURIComponent(id)}/address`, { version, ...address }),
