@@ -77,9 +77,9 @@ reviews walk the list against the code.
 | Email and name steps | `/welcome/email`, `/welcome/name` | Admins who haven't given them yet |
 | Dashboard: Kirana / Salon, six counts | `/?type=SALON` | Admins |
 | Shop list for a type and group, with search, 50 at a time ("Show more shops"); All / Unassigned for waiting groups | `/shops?type=KIRANA&group=FIRST_VISIT&q=&who=UNASSIGNED` | Admins (a field agent: their own only) |
-| Shop page: what changed, photos, details, Navigate, Call owner, timeline, decisions; "Visit by" with Assign / Reassign | `/shops/:id` | Admins (Assign: super admin) |
+| Shop page: what changed, photos, details (with "Reads: <language>" when the owner saved one), Navigate, Call owner, timeline, decisions; "Visit by" with Assign / Reassign | `/shops/:id` | Admins (Assign: super admin) |
 | Tickets: mine (Waiting on us / on them / Resolved); super admins: everyone's, Unassigned, by person | `/tickets?view=OPEN&who=` | Support people, super admin |
-| A ticket: who asked (account, business, latest bookings), the conversation, reply / Send & resolve, Close without reply, Give to someone else | `/tickets/:id` | Support people (their own), super admin |
+| A ticket: who asked (account, business, latest bookings, "Reads: <language>"), the conversation, reply / Send & resolve, Close without reply, Give to someone else | `/tickets/:id` | Support people (their own), super admin |
 | Strikes: a customer's strikes | `/support` | Super admin |
 | Team: members (Edit, Move waiting visits, Remove) and Coverage (pincode → agents) | `/team`, `/team?view=coverage` | Super admin |
 | Add or edit a member: phone, email, name, role, designation, pincodes (chips) | `/team/new`, `/team/:id` | Super admin |
@@ -108,7 +108,7 @@ flowchart TD
 flowchart LR
   S["Owner submits"] --> FV["PENDING_VISIT: Waiting for first visit"]
   FV -- "Approve" --> L["APPROVED: Live"]
-  FV -- "Send back (reason)" --> SB["DRAFT: Sent back"]
+  FV -- "Send back (reasons ticked)" --> SB["DRAFT: Sent back"]
   SB -- "owner fixes and submits" --> FV
   FV -- "Suspend (reason)" --> SU["SUSPENDED"]
   L -- "owner edits address, pin, GST or photos" --> RC["PENDING_VISIT: Re-check after edit"]
@@ -155,6 +155,25 @@ meanwhile the backend answers 409 `SHOP_CHANGED`: the page says "The owner chang
 again" with Reload, and keeps what was typed for the next try. 409 `WRONG_STATUS` (someone else decided first)
 reloads the shop so its new buttons show. Each sheet locks while sending, so a double tap sends once.
 
+**What the owner is told** (backend V84). Send back, Ask to fix and Decline (an address request) take **reasons
+ticked from a fixed list** (`reasonCodes`, `ReasonPicker`; the team reads them in English, `REVIEW_REASON_LABELS`;
+the owner reads each in their own language in the partner app) and an **optional note** for the owner (`reason`;
+2–200 when written, needed with Other; the owner sees it under the reasons, as written, never translated). At least
+one reason is needed (`checkReasons` in `lib/rules.ts`, the backend's rules). Suspend still takes a written reason and
+the checklist.
+- **Which reasons are offered:** a salon gets all 14 (shop front photo, name board, inside photos, the licence
+  unreadable / name mismatch / expired / not a trade licence, address, pin, services or prices, opening hours, the
+  video, the owner's name, Other); a kirana none of the salon-only ones (licence, services, hours, video). Ask to fix
+  on a live re-check lists the photo and video reasons first (`fixReasonsFor`). Declining an address offers only
+  Address is wrong, Pin is in the wrong place and Other (`ADDRESS_DECLINE_REASONS`).
+- **Reads hint:** above the note, "Reads: Telugu" (the owner's or requester's saved language, `ownerLanguage` /
+  `requesterLanguage`) and that the note goes as written: write simply or in their language, prefer the ticks.
+  Nothing when no language is saved. The same "Reads" line is on the shop's details, the address request and a help
+  ticket.
+- **Afterwards** ("The owner was told", the timeline): the reasons ticked as pills with their English labels (Other as
+  just "Other"; a code this app doesn't know yet as it is), then the note. Rows from before show the words as before.
+- On a phone the sheet's Submit stays in reach (sticky) while the reasons scroll.
+
 ### The test-mode banner
 
 `/admin/me` is read every minute and on focus; the banner also checks its end time every 15 seconds, so it goes on
@@ -200,7 +219,9 @@ them and the app follows it.)
 A decision answered 409 `SHOP_CHANGED` or `WRONG_STATUS` refreshes the dashboard, the lists and the shop, and turns
 the decision buttons off until a reload works (a failed reload keeps the banner). `WRONG_STATUS` re-reads the shop at
 once and says what it is now. A decision whose answer is lost re-reads the shop: if the shop already shows the
-decision, that is a success; otherwise the form stays, with the offline message. Every admin write goes through one
+decision, that is a success; otherwise the form stays, with the offline message. For Ask to fix "already shows the
+decision" means still waiting with the same reasons ticked (in any order) and the same note: an earlier ask isn't
+proof. Every admin write goes through one
 path in `api/admin.ts` that re-reads `/admin/me` on 403 or 404.
 
 ### Security headers
@@ -243,6 +264,21 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### 0.19.0 — 2026-11-20
+
+Needs the backend with V83–V84 (each user's language, the fixed reasons). Deploy the backend first, then the partner
+app (0.29.0, which shows the reasons to owners), then this one.
+
+- **Fixed reasons for the owner:** Send back, Ask to fix and Decline an address request ask the team to tick one or
+  more reasons from a fixed list (English labels here; the owner reads each in their language), with an optional note
+  (needed with Other). Suspend is unchanged. Address declines offer only address, pin and Other; Ask to fix lists the
+  photo and video reasons first. See "Decisions".
+- **"Reads: <language>"** on the business's details, its address request and a help ticket, and above the note in the
+  decision sheets with a hint to write simply (or in that language) and prefer the ticks.
+- **What the owner was told** and the timeline show the ticked reasons, then the note.
+- A lost answer to Ask to fix counts as sent only when the shop shows the same reasons and note.
+- The decision sheet's buttons stay in reach on a phone.
 
 ### 0.18.0 — 2026-11-16
 
