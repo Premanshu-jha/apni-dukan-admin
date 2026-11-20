@@ -10,6 +10,7 @@ const request = (over: Record<string, unknown> = {}) => ({
   longitude: 77.32,
   status: 'PENDING',
   reason: null,
+  requesterLanguage: null,
   createdAt: new Date(Date.now() - 60 * 60_000).toISOString(),
   decidedAt: null,
   ...over,
@@ -40,18 +41,41 @@ test('the owner’s address request: badge in the list, old and new with their p
   await expect(asked).toBeHidden()
 })
 
-test('declining the owner’s address request asks for the reason; a request already gone says so', async ({ page, context, api }) => {
-  const shop = api.addShop({ name: 'Shine Salon', type: 'SALON', status: 'APPROVED' }, { approvedBefore: true, rechecking: true, addressRequest: request() })
+test('declining the owner’s address request asks for reasons and an optional note; a request already gone says so', async ({ page, context, api }) => {
+  const shop = api.addShop({ name: 'Shine Salon', type: 'SALON', status: 'APPROVED' }, { approvedBefore: true, rechecking: true, addressRequest: request({ requesterLanguage: 'kn' }) })
   await signedIn(context, api)
   await page.goto(`/shops/${shop.id}`)
   const asked = page.getByRole('region', { name: 'The owner asks for a new address' })
+  await expect(asked.getByText('Reads: Kannada')).toBeVisible()
   await asked.getByRole('button', { name: 'Decline the new address' }).click()
-  await expect(asked.getByRole('button', { name: 'Decline', exact: true })).toBeDisabled()
-  await asked.getByLabel('Why (the owner is told)').fill('The board at the new place shows another salon.')
+  // Only the reasons that fit an address (no photo reasons)
+  await expect(asked.getByRole('checkbox')).toHaveCount(3)
+  await expect(asked.getByLabel('Opening hours missing')).toHaveCount(0)
+  await expect(asked.getByLabel('Name board not visible')).toHaveCount(0)
+  // Above the note: the language the owner reads, and that the note isn't translated
+  await expect(asked.getByText('Reads: Kannada')).toBeVisible()
+  await expect(asked.getByText('The note is shown as written; the owner reads Kannada: write simply or in their language. Prefer the ticks.')).toBeVisible()
+  await asked.getByRole('button', { name: 'Decline', exact: true }).click()
+  await expect(asked.getByText('Tick at least one reason')).toBeVisible()
+  await asked.getByLabel('Other (say what in the note)').check()
+  await asked.getByRole('button', { name: 'Decline', exact: true }).click()
+  await expect(asked.getByText('Write what is wrong: you ticked Other')).toBeVisible()
+  expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id}/address-request/decline`)).toBe(0)
+  await asked.getByLabel('Pin is in the wrong place').check()
+  await asked.getByLabel('Note for the owner', { exact: true }).fill('The board at the new place shows another salon.')
   await asked.getByRole('button', { name: 'Decline', exact: true }).click()
   await expect(page.getByText('Address change declined. The owner was told why', { exact: false })).toBeVisible()
   expect(shop.addressLine).toBe('Shop 12, Ithum Tower')
+  expect(api.calls.find((c) => c.path.endsWith('/address-request/decline'))?.body).toEqual({
+    version: 3,
+    reasonCodes: ['PIN_WRONG_PLACE', 'OTHER'],
+    reason: 'The board at the new place shows another salon.',
+  })
   await expect(asked).toBeHidden()
+  // The timeline says it in English, as the backend writes it, with the reasons ticked
+  const first = page.getByRole('list', { name: 'Timeline, newest first' }).getByRole('listitem').first()
+  await expect(first).toContainText('Address change declined: The board at the new place shows another salon.')
+  await expect(first.getByRole('list', { name: 'Reasons ticked' }).getByRole('listitem')).toHaveText(['Pin is in the wrong place', 'Other'])
   // Still waiting for the rest of the re-check
   await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible()
 
@@ -60,7 +84,9 @@ test('declining the owner’s address request asks for the reason; a request alr
   await page.goto(`/shops/${other.id}`)
   const card = page.getByRole('region', { name: 'The owner asks for a new address' })
   await card.getByRole('button', { name: 'Decline the new address' }).click()
-  await card.getByLabel('Why (the owner is told)').fill('Wrong pin.')
+  // No language saved: no "Reads" line
+  await expect(card.getByText(/^Reads:/)).toHaveCount(0)
+  await card.getByLabel('Pin is in the wrong place').check()
   api.extra.get(other.id as string)!.addressRequest = null
   other.version = (other.version as number) + 1
   await card.getByRole('button', { name: 'Decline', exact: true }).click()

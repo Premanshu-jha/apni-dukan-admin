@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { adminApi } from '../../api/admin'
 import { explain, fieldError, isApiError, isNetwork } from '../../api/errors'
-import type { AdminShop, ChecklistItem, TimelineEntry } from '../../api/types'
+import type { AdminShop, ChecklistItem, ReviewReason, TimelineEntry } from '../../api/types'
 import { Banner, Button, Sheet, TextArea } from '../../components/ui'
-import { CHECKLIST_LABELS, checklistFor } from '../../lib/labels'
+import { CHECKLIST_LABELS, checklistFor, fixReasonsFor, reviewReasonsFor } from '../../lib/labels'
 import {
   checkDecision,
   checkNote,
@@ -16,18 +16,22 @@ import {
   REASON_MAX,
   reasonFromChecklist,
   type Decision,
+  usesReasonCodes,
 } from '../../lib/rules'
+import { ReadsHint, ReasonPicker } from './ReasonPicker'
 
 /** What the admin has typed for a decision; kept by the page so a reload after a 409 doesn't lose it. */
 export interface Draft {
   checklist: ChecklistItem[]
+  /** Send back and Ask to fix: the reasons the owner is told (in their language). */
+  reasonCodes: ReviewReason[]
   reason: string
   /** The reason was typed by hand: ticking items no longer rewrites it. */
   reasonEdited: boolean
   note: string
 }
 
-export const EMPTY_DRAFT: Draft = { checklist: [], reason: '', reasonEdited: false, note: '' }
+export const EMPTY_DRAFT: Draft = { checklist: [], reasonCodes: [], reason: '', reasonEdited: false, note: '' }
 
 /** A refusal the page handles itself (it reloads the shop). */
 export type Conflict = 'SHOP_CHANGED' | 'WRONG_STATUS'
@@ -35,15 +39,16 @@ export type Conflict = 'SHOP_CHANGED' | 'WRONG_STATUS'
 const CONFIRM_TEXT: Record<Decision, string> = {
   approve: 'The business goes live: customers can find it.',
   reinstate: 'The business comes back for a visit: it waits in "Re-check after edit" until someone approves it.',
-  reject: 'The owner gets it back to fix, with your reason.',
+  reject: 'The owner gets it back to fix, with the reasons you tick.',
   suspend: 'The business disappears for customers. The owner sees your reason.',
-  'ask-to-fix': 'The business stays live and waits here. The owner sees your reason and fixes it in the app.',
+  'ask-to-fix': 'The business stays live and waits here. The owner sees the reasons you tick and fixes it in the app.',
 }
 
 /**
- * Approve, Send back, Suspend or Reinstate one shop, for the version on screen when the sheet opened. Send back and
- * Suspend ask for a checklist, a reason the owner sees (2–200) and an optional internal note (up to 500); Approve
- * and Reinstate only confirm, with an optional note. A double tap sends once.
+ * Approve, Send back, Ask to fix, Suspend or Reinstate one shop, for the version on screen when the sheet opened. Send
+ * back and Ask to fix ask for one or more fixed reasons (the owner reads them in their language) and an optional note
+ * for the owner (needed with Other); Suspend asks for a checklist and a reason the owner sees (2–200). Each takes an
+ * optional internal note (up to 500); Approve and Reinstate only confirm. A double tap sends once.
  */
 export function DecisionSheet({
   shop,
@@ -74,8 +79,10 @@ export function DecisionSheet({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [shown, setShown] = useState(false)
-  const withReason = needsReason(decision)
-  const errors = checkDecision(decision, draft.reason, draft.note)
+  const withCodes = usesReasonCodes(decision)
+  /** Suspend: the checklist and a reason the owner must be given. */
+  const withReason = needsReason(decision) && !withCodes
+  const errors = checkDecision(decision, draft.reason, draft.note, draft.reasonCodes)
   const label = DECISION_LABELS[decision]
 
   function toggle(item: ChecklistItem) {
@@ -86,7 +93,7 @@ export function DecisionSheet({
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setShown(true)
-    if (sending.current || errors.reason || errors.note) return
+    if (sending.current || errors.reasonCodes || errors.reason || errors.note) return
     sending.current = true
     setBusy(true)
     setError(null)
@@ -94,6 +101,7 @@ export function DecisionSheet({
       const updated = await adminApi.decide(shop.id, decision, {
         version,
         ...(withReason ? { reason: clean(draft.reason), checklist: draft.checklist } : {}),
+        ...(withCodes ? { reasonCodes: draft.reasonCodes, reason: optional(draft.reason) } : {}),
         note: optional(draft.note),
       })
       onDone(updated)
@@ -112,6 +120,29 @@ export function DecisionSheet({
       <form onSubmit={submit} noValidate className="flex max-h-[75dvh] flex-col gap-4 overflow-y-auto">
         <p className="text-sm text-muted">{CONFIRM_TEXT[decision]}</p>
         {extra && <p className="text-sm font-medium">{extra}</p>}
+        {withCodes && (
+          <ReasonPicker
+            id="decision-reasons"
+            // A live re-check is mostly about photos and the video: those first, so Submit isn't far below
+            options={decision === 'ask-to-fix' ? fixReasonsFor(shop.type) : reviewReasonsFor(shop.type)}
+            value={draft.reasonCodes}
+            onChange={(reasonCodes) => onDraft({ ...draft, reasonCodes })}
+            disabled={busy}
+            error={(shown && errors.reasonCodes) || fieldError(error, 'reasonCodes')}
+          />
+        )}
+        {withCodes && <ReadsHint language={shop.ownerLanguage} />}
+        {withCodes && (
+          <TextArea
+            id="decision-reason"
+            label={draft.reasonCodes.includes('OTHER') ? 'Note for the owner' : 'Note for the owner (optional)'}
+            value={draft.reason}
+            maxLength={REASON_MAX + 50}
+            onChange={(e) => onDraft({ ...draft, reason: e.target.value, reasonEdited: true })}
+            hint={`The owner sees this under the reasons, as you write it. ${codePoints(clean(draft.reason))}/${REASON_MAX}`}
+            error={(shown && errors.reason) || fieldError(error, 'reason')}
+          />
+        )}
         {withReason && (
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-2 text-sm font-medium text-muted">What was wrong (tick all that apply)</legend>
@@ -148,7 +179,8 @@ export function DecisionSheet({
           error={(shown && errors.note) || fieldError(error, 'note')}
         />
         {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
-        <div className="flex gap-2">
+        {/* Stays in reach on a phone while the reasons scroll */}
+        <div className="sticky bottom-0 -mb-px flex gap-2 border-t border-line bg-surface pt-3">
           <Button variant="secondary" className="flex-1" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

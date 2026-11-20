@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { adminApi } from '../../api/admin'
 import { explain, fieldError, isApiError } from '../../api/errors'
-import type { AddressIn, AddressRequest, AdminShop } from '../../api/types'
-import { Banner, Button, Card, Field } from '../../components/ui'
+import type { AddressIn, AddressRequest, AdminShop, ReviewReason } from '../../api/types'
+import { Banner, Button, Card, Field, TextArea } from '../../components/ui'
+import { ADDRESS_DECLINE_REASONS, readsText } from '../../lib/labels'
 import { directionsUrl, distanceLabel } from '../../lib/links'
+import { checkReasons, clean, codePoints, optional, REASON_MAX } from '../../lib/rules'
 import { dateTimeIst } from '../../lib/time'
+import { ReadsHint, ReasonPicker } from './ReasonPicker'
 
 /** A pin on Google Maps, to compare the old and the new place. */
 export function mapUrl(latitude: number, longitude: number): string {
@@ -26,8 +29,8 @@ function addressText(a: Pick<AddressIn, 'addressLine' | 'area' | 'city' | 'pinco
 
 /**
  * The owner's address change request: the address now and the one asked for, each with its pin on Google Maps, and
- * how far the pin moves. Approve (below, with the business's other changes) applies it; Decline asks for the reason
- * the owner is told.
+ * how far the pin moves. Approve (below, with the business's other changes) applies it; Decline asks for one or more
+ * reasons the owner is told (in their language) and an optional note (needed with Other).
  */
 export function AddressRequestCard({
   shop,
@@ -48,24 +51,36 @@ export function AddressRequestCard({
   const [declining, setDeclining] = useState(false)
   /** The version on screen when Decline was opened: a request changed since answers SHOP_CHANGED, not refused unseen. */
   const [seen, setSeen] = useState<number | null>(shop.version)
+  const [codes, setCodes] = useState<ReviewReason[]>([])
   const [reason, setReason] = useState('')
+  const [shown, setShown] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const problems = checkReasons(codes, reason)
+  const reads = readsText(request.requesterLanguage)
 
   async function decline() {
+    setShown(true)
+    if (busy || problems.reasonCodes || problems.reason) return
     setBusy(true)
     setError(null)
     try {
       // After a conflict and Reload: the version reloaded, which the admin has looked at
-      const updated = await adminApi.declineAddressRequest(shop.id, seen ?? shop.version, reason.trim())
+      const updated = await adminApi.declineAddressRequest(shop.id, {
+        version: seen ?? shop.version,
+        reasonCodes: codes,
+        reason: optional(reason),
+      })
       setDeclining(false)
+      setCodes([])
       setReason('')
+      setShown(false)
       onDone(updated, 'Address change declined. The owner was told why and keeps the old address.')
     } catch (e) {
       if (isApiError(e, 'SHOP_CHANGED') || isApiError(e, 'WRONG_STATUS') || isApiError(e, 'NO_ADDRESS_REQUEST')) {
         setSeen(null)
         onConflict(e)
-      } else setError(explain(e))
+      } else setError(e)
     } finally {
       setBusy(false)
     }
@@ -104,6 +119,8 @@ export function AddressRequestCard({
             ? "Approve (below) makes this the business's address; the owner is told."
             : 'It is applied when you approve the business after its visit, or set it now with Change address.'}
         </p>
+        {/* While declining, it is said above the note instead */}
+        {reads && !declining && <p className="text-sm">{reads}</p>}
         {canAct && !declining && (
           <Button
             variant="secondary"
@@ -116,18 +133,27 @@ export function AddressRequestCard({
           </Button>
         )}
         {declining && (
-          <div className="flex flex-col gap-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-muted">Why (the owner is told)</span>
-              <textarea
-                value={reason}
-                maxLength={200}
-                rows={2}
-                onChange={(e) => setReason(e.target.value)}
-                className="rounded-xl border border-line bg-surface p-3 text-base text-ink focus:border-brand focus:outline-none"
-              />
-            </label>
-            <Button variant="danger" busy={busy} disabled={reason.trim().length < 2 || !canAct} onClick={decline}>
+          <div className="flex flex-col gap-3">
+            <ReasonPicker
+              id="decline-reasons"
+              options={ADDRESS_DECLINE_REASONS}
+              value={codes}
+              onChange={setCodes}
+              disabled={busy}
+              error={(shown && problems.reasonCodes) || fieldError(error, 'reasonCodes')}
+            />
+            <ReadsHint language={request.requesterLanguage} />
+            <TextArea
+              id="decline-reason"
+              label={codes.includes('OTHER') ? 'Note for the owner' : 'Note for the owner (optional)'}
+              value={reason}
+              maxLength={REASON_MAX + 50}
+              rows={2}
+              onChange={(e) => setReason(e.target.value)}
+              hint={`The owner sees this under the reasons, as you write it. ${codePoints(clean(reason))}/${REASON_MAX}`}
+              error={(shown && problems.reason) || fieldError(error, 'reason')}
+            />
+            <Button variant="danger" busy={busy} disabled={!canAct} onClick={decline}>
               Decline
             </Button>
             <Button variant="secondary" disabled={busy} onClick={() => setDeclining(false)}>
@@ -135,7 +161,7 @@ export function AddressRequestCard({
             </Button>
           </div>
         )}
-        {error && <Banner tone="bad">{error}</Banner>}
+        {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
       </Card>
     </section>
   )

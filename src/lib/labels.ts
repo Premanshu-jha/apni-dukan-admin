@@ -1,5 +1,5 @@
 import { dateOnly, dateTimeIst, howLong, todayInIndia } from './time'
-import type { AdminRole, LicenceAiUsage, ChecklistItem, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry, Designation } from '../api/types'
+import type { AdminRole, LicenceAiUsage, ChecklistItem, Language, ReviewReason, ShopGroup, ShopStatus, ShopType, StrikeKind, TimelineEntry, Designation } from '../api/types'
 
 export const SHOP_TYPES: ShopType[] = ['KIRANA', 'SALON']
 export const TYPE_LABELS: Record<ShopType, string> = { KIRANA: 'Kirana', SALON: 'Salon' }
@@ -79,6 +79,100 @@ export const CHECKLIST: ChecklistItem[] = [
 /** The checklist offered for a business: a salon has no GSTIN or Udyam number now, so no "doesn't match" for them. */
 export function checklistFor(type: ShopType): ChecklistItem[] {
   return type === 'SALON' ? CHECKLIST.filter((c) => c !== 'GST_UDYAM_MISMATCH') : CHECKLIST
+}
+
+/** Every reason the team can give the owner, in the order the field team checks a business. */
+export const REVIEW_REASONS: ReviewReason[] = [
+  'SHOP_FRONT_PHOTO',
+  'BOARD_NOT_VISIBLE',
+  'INSIDE_PHOTOS',
+  'LICENCE_UNREADABLE',
+  'LICENCE_NAME_MISMATCH',
+  'LICENCE_EXPIRED',
+  'LICENCE_WRONG_TYPE',
+  'ADDRESS_WRONG',
+  'PIN_WRONG_PLACE',
+  'SERVICES_MISSING',
+  'HOURS_MISSING',
+  'VIDEO_UNCLEAR',
+  'OWNER_NAME',
+  'OTHER',
+]
+
+/** The reasons for the team, in English (the owner sees each in their own language). */
+export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
+  SHOP_FRONT_PHOTO: 'Shop front photo missing or unclear',
+  BOARD_NOT_VISIBLE: 'Name board not visible',
+  INSIDE_PHOTOS: 'Inside photos missing or unclear',
+  LICENCE_UNREADABLE: "Licence can't be read",
+  LICENCE_NAME_MISMATCH: "Name on the licence doesn't match",
+  LICENCE_EXPIRED: 'Licence has expired',
+  LICENCE_WRONG_TYPE: 'Not a trade licence',
+  ADDRESS_WRONG: 'Address is wrong',
+  PIN_WRONG_PLACE: 'Pin is in the wrong place',
+  SERVICES_MISSING: 'Services or prices missing',
+  HOURS_MISSING: 'Opening hours missing',
+  VIDEO_UNCLEAR: 'Salon video unclear',
+  OWNER_NAME: "Owner's name is wrong",
+  OTHER: 'Other (say what in the note)',
+}
+
+/**
+ * A reason as the team reads it afterwards ("The owner was told", the timeline): its English label; Other as just
+ * "Other" (its words are the note); a code this app doesn't know yet is shown as is.
+ */
+export function reviewReasonLabel(code: string): string {
+  if (code === 'OTHER') return 'Other'
+  return REVIEW_REASON_LABELS[code as ReviewReason] ?? code
+}
+
+/** Only a salon has a trade licence, services, hours and a video: a kirana is not offered those reasons. */
+const SALON_ONLY_REASONS: ReviewReason[] = [
+  'LICENCE_UNREADABLE',
+  'LICENCE_NAME_MISMATCH',
+  'LICENCE_EXPIRED',
+  'LICENCE_WRONG_TYPE',
+  'SERVICES_MISSING',
+  'HOURS_MISSING',
+  'VIDEO_UNCLEAR',
+]
+
+/** The reasons offered when sending a business back or asking for a fix. */
+export function reviewReasonsFor(type: ShopType): ReviewReason[] {
+  return type === 'SALON' ? REVIEW_REASONS : REVIEW_REASONS.filter((r) => !SALON_ONLY_REASONS.includes(r))
+}
+
+/** The reasons offered when declining an owner's new address. */
+export const ADDRESS_DECLINE_REASONS: ReviewReason[] = ['ADDRESS_WRONG', 'PIN_WRONG_PLACE', 'OTHER']
+
+/** The photo and video reasons: a live re-check (Ask to fix) is mostly about these, so they are listed first there. */
+const MEDIA_REASONS: ReviewReason[] = ['SHOP_FRONT_PHOTO', 'BOARD_NOT_VISIBLE', 'INSIDE_PHOTOS', 'VIDEO_UNCLEAR']
+
+/** The reasons offered for Ask to fix on a live re-check: the photo and video ones first, then the rest in order. */
+export function fixReasonsFor(type: ShopType): ReviewReason[] {
+  const all = reviewReasonsFor(type)
+  return [...all.filter((r) => MEDIA_REASONS.includes(r)), ...all.filter((r) => !MEDIA_REASONS.includes(r))]
+}
+
+export const LANGUAGE_NAMES: Record<Language, string> = {
+  en: 'English',
+  hi: 'Hindi',
+  te: 'Telugu',
+  mr: 'Marathi',
+  ta: 'Tamil',
+  kn: 'Kannada',
+}
+
+/** The saved language's name ("Telugu"); null when none is saved. A code this app doesn't know yet is shown as is. */
+export function languageName(language: string | null | undefined): string | null {
+  if (!language) return null
+  return LANGUAGE_NAMES[language as Language] ?? language
+}
+
+/** "Reads: Telugu" for the person's saved language; null when none is saved (nothing is shown). */
+export function readsText(language: string | null | undefined): string | null {
+  const name = languageName(language)
+  return name ? `Reads: ${name}` : null
 }
 
 /** Why a trade licence wasn't accepted (LicenceCheckReason on the backend), for the field team. */

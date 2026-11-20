@@ -1,5 +1,5 @@
 import { expect, signedIn, test } from './helpers'
-import { PHOTOS } from './mockApi'
+import { API, PHOTOS } from './mockApi'
 
 const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 
@@ -102,34 +102,42 @@ test('approve with an optional note: it goes live, the timeline shows it, the li
   await expect(page.getByRole('link', { name: 'Waiting for first visit: 0' })).toBeVisible()
 })
 
-test('send back: checklist, a reason started from the ticks, checks before sending, then a sent-back draft has no decisions', async ({ page, context, api }) => {
+test('send back: tick at least one reason (Other needs a note), an optional note, then a sent-back draft has no decisions', async ({ page, context, api }) => {
   const shop = api.addShop({ name: 'Gupta General Store' })
   await signedIn(context, api)
   await page.goto(`/shops/${shop.id}`)
   await page.getByRole('button', { name: 'Send back', exact: true }).click()
   const sheet = page.getByRole('dialog')
-  const reason = sheet.getByLabel('Reason for the owner')
+  // A kirana: no licence, services, hours or video reasons
+  await expect(sheet.getByLabel('Pin is in the wrong place')).toBeVisible()
+  await expect(sheet.getByLabel('Salon video unclear')).toHaveCount(0)
+  await expect(sheet.getByLabel("Licence can't be read")).toHaveCount(0)
   await sheet.getByRole('button', { name: 'Send back' }).click()
-  await expect(sheet.getByText('Write a reason for the owner')).toBeVisible()
+  await expect(sheet.getByText('Tick at least one reason')).toBeVisible()
   expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id}/reject`)).toBe(0)
 
-  await sheet.getByLabel("Photo doesn't show the name board").check()
+  // Other: the note is needed
+  await sheet.getByLabel('Other (say what in the note)').check()
+  await expect(sheet.getByLabel('Note for the owner', { exact: true })).toBeVisible()
+  await sheet.getByRole('button', { name: 'Send back' }).click()
+  await expect(sheet.getByText('Write what is wrong: you ticked Other')).toBeVisible()
+  expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id}/reject`)).toBe(0)
+  await sheet.getByLabel('Other (say what in the note)').uncheck()
+
   await sheet.getByLabel('Pin is in the wrong place').check()
-  await expect(reason).toHaveValue("Photo doesn't show the name board. Pin is in the wrong place.")
-  await reason.fill('Please retake the shop photo with the board, and move the pin to the door.')
-  await sheet.getByLabel('Business was shut').check()
-  // Typed by hand: ticking more no longer rewrites it
-  await expect(reason).toHaveValue('Please retake the shop photo with the board, and move the pin to the door.')
+  await sheet.getByLabel('Name board not visible').check()
+  await sheet.getByLabel('Note for the owner (optional)').fill('Move the pin to the door.')
   await sheet.getByLabel('Internal note (optional)').fill('x'.repeat(501))
   await sheet.getByRole('button', { name: 'Send back' }).click()
   await expect(sheet.getByText('Keep it under 500 characters (now 501)')).toBeVisible()
   await sheet.getByLabel('Internal note (optional)').fill('Owner was polite')
   await sheet.getByRole('button', { name: 'Send back' }).click()
-  await expect(page.getByText('Sent back to the owner with your reason.')).toBeVisible()
+  await expect(page.getByText('Sent back to the owner with the reasons you ticked.')).toBeVisible()
+  // In the list's order, whatever order they were ticked in
   expect(api.calls.find((c) => c.path.endsWith('/reject'))?.body).toEqual({
     version: 3,
-    reason: 'Please retake the shop photo with the board, and move the pin to the door.',
-    checklist: ['NAME_BOARD_NOT_VISIBLE', 'PIN_WRONG', 'SHOP_SHUT'],
+    reasonCodes: ['BOARD_NOT_VISIBLE', 'PIN_WRONG_PLACE'],
+    reason: 'Move the pin to the door.',
     note: 'Owner was polite',
   })
   await expect(page.getByText('The owner was told:')).toBeVisible()
@@ -137,8 +145,58 @@ test('send back: checklist, a reason started from the ticks, checks before sendi
   await expect(page.getByRole('button', { name: 'Add note' })).toBeVisible()
   const first = page.getByRole('list', { name: 'Timeline, newest first' }).getByRole('listitem').first()
   await expect(first).toContainText('Sent back by Asha Field')
-  await expect(first).toContainText('Business was shut')
   await expect(first).toContainText('Owner was polite')
+})
+
+test('send back with reasons only: no note is sent, and the backend refusing a reason is spelled out', async ({ page, context, api }) => {
+  const shop = api.addShop({ name: 'Shine Salon', type: 'SALON' })
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  await page.getByRole('button', { name: 'Send back', exact: true }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Licence has expired').check()
+  await sheet.getByLabel('Opening hours missing').check()
+  // A backend that no longer knows a reason this app offers (ShopAdminService.reasons' answer)
+  api.failOnce.set('/reject', { status: 400, code: 'VALIDATION_FAILED', message: 'Some fields are not valid', details: { reasonCodes: 'unknown reason: HOURS_MISSING' } })
+  await sheet.getByRole('button', { name: 'Send back' }).click()
+  await expect(sheet.getByText('unknown reason: HOURS_MISSING', { exact: true })).toBeVisible()
+  await expect(sheet.getByText('The reasons: unknown reason: HOURS_MISSING.')).toBeVisible()
+  await sheet.getByRole('button', { name: 'Send back' }).click()
+  await expect(page.getByText('Sent back to the owner with the reasons you ticked.')).toBeVisible()
+  expect(api.calls.filter((c) => c.path.endsWith('/reject')).at(-1)?.body).toEqual({ version: 3, reasonCodes: ['LICENCE_EXPIRED', 'HOURS_MISSING'] })
+  expect(shop.statusReason).toBeNull()
+  expect(shop.statusReasonCodes).toEqual(['LICENCE_EXPIRED', 'HOURS_MISSING'])
+  // Ticks alone are what the owner was told: shown in English, with no note under them
+  const told = page.getByText('The owner was told:').locator('..')
+  await expect(told.getByRole('list', { name: 'Reasons ticked' }).getByRole('listitem')).toHaveText(['Licence has expired', 'Opening hours missing'])
+  await expect(told.getByText('"')).toHaveCount(0)
+  const first = page.getByRole('list', { name: 'Timeline, newest first' }).getByRole('listitem').first()
+  await expect(first.getByRole('list', { name: 'Reasons ticked' })).toContainText('Licence has expired')
+  // Still a sent-back draft for the lists, though no words were written
+  await page.goto('/shops?type=SALON&group=SENT_BACK')
+  await expect(page.getByRole('link', { name: /Shine Salon/ })).toBeVisible()
+})
+
+test('the fake backend answers reasons as ShopAdminService does: none is the old rule, unknown named, repeats dropped', async ({ page, context, api }) => {
+  const shop = api.addShop({ name: 'Gupta General Store' })
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id as string}`)
+  await expect(page.getByRole('button', { name: 'Send back', exact: true })).toBeVisible()
+  const auth = api.calls.findLast((c) => c.auth)!.auth!
+  const post = (body: object) =>
+    page.evaluate(
+      async ([url, auth, body]) => {
+        const r = await fetch(url, { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        return { status: r.status, body: await r.json() }
+      },
+      [`${API}/api/v1/admin/shops/${shop.id as string}/reject`, auth, body] as const,
+    )
+  expect(await post({ version: 3, reasonCodes: ['NOT_A_REASON'] })).toMatchObject({ status: 400, body: { details: { reasonCodes: 'unknown reason: NOT_A_REASON' } } })
+  // No reasons: the reason is needed, as before reasons existed
+  expect(await post({ version: 3, reasonCodes: [] })).toMatchObject({ status: 400, body: { details: { reason: 'must have at least 2 letters or digits' } } })
+  expect(await post({ version: 3, reasonCodes: ['OTHER'] })).toMatchObject({ status: 400, body: { details: { reason: 'say what else to fix' } } })
+  const done = await post({ version: 3, reasonCodes: ['PIN_WRONG_PLACE', 'PIN_WRONG_PLACE', 'BOARD_NOT_VISIBLE'] })
+  expect(done).toMatchObject({ status: 200, body: { statusReason: null, statusReasonCodes: ['PIN_WRONG_PLACE', 'BOARD_NOT_VISIBLE'], group: 'SENT_BACK' } })
 })
 
 test('a backend field refusal is spelled out (400 VALIDATION_FAILED)', async ({ page, context, api }) => {
@@ -176,7 +234,8 @@ test('409 SHOP_CHANGED: decisions stay off until Reload works; what was typed is
   await signedIn(context, api)
   await page.goto(`/shops/${shop.id}`)
   await page.getByRole('button', { name: 'Send back', exact: true }).click()
-  await page.getByRole('dialog').getByLabel('Reason for the owner').fill('Pin is at the wrong building')
+  await page.getByRole('dialog').getByLabel('Pin is in the wrong place').check()
+  await page.getByRole('dialog').getByLabel('Note for the owner (optional)').fill('Pin is at the wrong building')
   api.ownerEdits(shop.id as string, { addressLine: 'Shop 14, Ithum Tower' })
   await page.getByRole('dialog').getByRole('button', { name: 'Send back' }).click()
   const banner = page.getByRole('alert').filter({ hasText: 'This business changed since you opened it (the owner or another admin). Reload and check again.' })
@@ -193,9 +252,10 @@ test('409 SHOP_CHANGED: decisions stay off until Reload works; what was typed is
   await expect(banner).toBeHidden()
   await expect(page.getByText('Shop 14, Ithum Tower')).toBeVisible()
   await page.getByRole('button', { name: 'Send back', exact: true }).click()
-  await expect(page.getByRole('dialog').getByLabel('Reason for the owner')).toHaveValue('Pin is at the wrong building')
+  await expect(page.getByRole('dialog').getByLabel('Note for the owner (optional)')).toHaveValue('Pin is at the wrong building')
+  await expect(page.getByRole('dialog').getByLabel('Pin is in the wrong place')).toBeChecked()
   await page.getByRole('dialog').getByRole('button', { name: 'Send back' }).click()
-  await expect(page.getByText('Sent back to the owner with your reason.')).toBeVisible()
+  await expect(page.getByText('Sent back to the owner with the reasons you ticked.')).toBeVisible()
   const sent = api.calls.filter((c) => c.path.endsWith('/reject')).map((c) => (c.body as { version: number }).version)
   expect(sent).toEqual([3, 4])
 })
@@ -225,7 +285,7 @@ test('409 WRONG_STATUS: another admin decided first; the shop is re-read and say
   await page.getByRole('link', { name: 'Waiting for first visit: 1' }).click()
   await page.getByRole('link', { name: /Gupta General Store/ }).click()
   await page.getByRole('button', { name: 'Send back', exact: true }).click()
-  await page.getByRole('dialog').getByLabel('Business was shut').check()
+  await page.getByRole('dialog').getByLabel('Name board not visible').check()
   // Another admin approved it a moment ago (the status, and with it the version, moved on)
   api.setStatus(shop.id as string, 'APPROVED')
   const reads = api.calledTimes('GET', `/api/v1/admin/shops/${shop.id}`)
@@ -320,14 +380,16 @@ test('weak network: offline when sending, so nothing went through; the form stay
   await page.goto(`/shops/${shop.id}`)
   await page.getByRole('button', { name: 'Send back', exact: true }).click()
   const sheet = page.getByRole('dialog')
-  await sheet.getByLabel('Reason for the owner').fill('Board not visible')
+  await sheet.getByLabel('Name board not visible').check()
+  await sheet.getByLabel('Note for the owner (optional)').fill('Board not visible')
   api.offline = true
   await sheet.getByRole('button', { name: 'Send back' }).click()
   await expect(sheet.getByText("You're offline or the server can't be reached. Try again.")).toBeVisible()
-  await expect(sheet.getByLabel('Reason for the owner')).toHaveValue('Board not visible')
+  await expect(sheet.getByLabel('Note for the owner (optional)')).toHaveValue('Board not visible')
+  await expect(sheet.getByLabel('Name board not visible')).toBeChecked()
   api.offline = false
   await sheet.getByRole('button', { name: 'Send back' }).click()
-  await expect(page.getByText('Sent back to the owner with your reason.')).toBeVisible()
+  await expect(page.getByText('Sent back to the owner with the reasons you ticked.')).toBeVisible()
 })
 
 test('an admin taken off the team mid-decision is moved out (old token 401, refresh says NONE, /admin/me 403)', async ({ page, context, api }) => {
@@ -603,14 +665,60 @@ test('a field agent asks the owner to fix a live salon’s re-check: it stays li
   await expect(page.getByRole('button', { name: 'Send back', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Suspend', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Ask the owner to fix', exact: true }).click()
-  await page.getByRole('dialog').getByLabel('Reason for the owner').fill('The board in the shop photo is not readable.')
+  // A salon: its licence, services, hours and video reasons too
+  await page.getByRole('dialog').getByLabel('Salon video unclear').check()
+  await page.getByRole('dialog').getByLabel('Name board not visible').check()
+  await page.getByRole('dialog').getByLabel('Note for the owner (optional)').fill('The board in the shop photo is not readable.')
   await page.getByRole('dialog').getByRole('button', { name: 'Ask the owner to fix' }).click()
   await expect(page.getByText('Sent to the owner. The business stays live and waits here until you approve it.')).toBeVisible()
   expect(shop.status).toBe('APPROVED')
   expect(api.extra.get(shop.id as string)!.rechecking).toBe(true)
+  expect(api.calls.find((c) => c.path.endsWith('/ask-to-fix'))?.body).toEqual({
+    version: 3,
+    reasonCodes: ['BOARD_NOT_VISIBLE', 'VIDEO_UNCLEAR'],
+    reason: 'The board in the shop photo is not readable.',
+  })
   await expect(page.getByRole('list', { name: 'Timeline, newest first' }).getByRole('listitem').first()).toContainText('Asked the owner to fix')
   // Still waiting: Approve when it is right
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+})
+
+test('ask to fix on a phone: photo and video reasons first, the language above the note, Submit in reach; a lost answer is proven by the ticks', async ({ page, context, api }) => {
+  await page.setViewportSize({ width: 360, height: 640 })
+  // Asked once before, with a tick and no note
+  const shop = api.addShop(
+    { status: 'APPROVED', type: 'SALON', name: 'Shine Unisex Salon', statusReason: null, statusReasonCodes: ['VIDEO_UNCLEAR'], ownerLanguage: 'te' },
+    { approvedBefore: true, rechecking: true },
+  )
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id as string}`)
+  const told = page.getByText('The owner was told:').locator('..')
+  await expect(told.getByRole('listitem')).toHaveText(['Salon video unclear'])
+  await page.getByRole('button', { name: 'Ask the owner to fix', exact: true }).click()
+  const sheet = page.getByRole('dialog')
+  const labels = await sheet.getByRole('checkbox').evaluateAll((boxes) => boxes.map((b) => b.closest('label')!.textContent))
+  expect(labels.slice(0, 4)).toEqual(['Shop front photo missing or unclear', 'Name board not visible', 'Inside photos missing or unclear', 'Salon video unclear'])
+  await expect(sheet.getByText('Reads: Telugu')).toBeVisible()
+  await expect(sheet.getByText('the owner reads Telugu: write simply or in their language. Prefer the ticks.', { exact: false })).toBeVisible()
+  const submit = sheet.getByRole('button', { name: 'Ask the owner to fix' })
+  await expect(submit).toBeInViewport()
+  await sheet.getByLabel('Shop front photo missing or unclear').check()
+
+  // The request never arrives and its answer is lost: the earlier ask (other ticks, no note either) isn't proof
+  api.failOnce.set('/ask-to-fix', { status: 500, code: 'X', message: 'x' })
+  api.loseAnswer.add('/ask-to-fix')
+  await submit.click()
+  await expect(sheet.getByText("You're offline or the server can't be reached. Try again.")).toBeVisible()
+  await expect(sheet.getByLabel('Shop front photo missing or unclear')).toBeChecked()
+  expect(shop.statusReasonCodes).toEqual(['VIDEO_UNCLEAR'])
+
+  // It goes through but the answer is lost: the re-read shows these ticks, so it's done
+  api.loseAnswer.add('/ask-to-fix')
+  await submit.click()
+  await expect(page.getByText('Sent to the owner. The business stays live and waits here until you approve it.')).toBeVisible()
+  expect(shop.statusReasonCodes).toEqual(['SHOP_FRONT_PHOTO'])
+  await expect(told.getByRole('listitem')).toHaveText(['Shop front photo missing or unclear'])
+  expect(api.calledTimes('POST', `/api/v1/admin/shops/${shop.id as string}/ask-to-fix`)).toBe(2)
 })
 
 test('super admins see what the licence checks cost this month, and a stop in red on both tabs; field agents see none of it', async ({ page, context, api }) => {
@@ -655,4 +763,17 @@ test('a field agent never asks for the licence checks’ cost', async ({ page, c
   await expect(page.getByRole('heading', { name: /Businesses/ })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Licence checks (AI)' })).toHaveCount(0)
   expect(api.calls.some((c) => c.path.endsWith('/admin/shops/licence-ai-usage'))).toBe(false)
+})
+
+test("the owner's language shows on the business (Reads), and nothing when none is saved", async ({ page, context, api }) => {
+  const shop = api.addShop({ name: 'Shine Salon', type: 'SALON', ownerLanguage: 'te' })
+  const other = api.addShop({ name: 'Style Point', type: 'SALON' })
+  await signedIn(context, api)
+  await page.goto(`/shops/${shop.id}`)
+  const details = page.getByRole('region', { name: 'Details' })
+  await expect(details.getByText('Reads', { exact: true })).toBeVisible()
+  await expect(details.getByText('Telugu', { exact: true })).toBeVisible()
+  await page.goto(`/shops/${other.id}`)
+  await expect(page.getByRole('region', { name: 'Details' }).getByText('Owner', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Details' }).getByText('Reads', { exact: true })).toHaveCount(0)
 })

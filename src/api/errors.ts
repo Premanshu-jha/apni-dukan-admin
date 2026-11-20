@@ -125,6 +125,7 @@ const FIELD_NAMES: Record<string, string> = {
   reason: 'The reason',
   note: 'The note',
   checklist: 'The checklist',
+  reasonCodes: 'The reasons:',
   version: 'The version',
   phone: 'The number',
   label: 'The label',

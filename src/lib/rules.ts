@@ -1,4 +1,4 @@
-import type { AdminShop, ChecklistItem, ShopStatus } from '../api/types'
+import type { AdminShop, ChecklistItem, ReviewReason, ShopStatus } from '../api/types'
 import { CHECKLIST, CHECKLIST_LABELS } from './labels'
 import { normalizePhone } from './phone'
 
@@ -59,6 +59,31 @@ export function needsReason(d: Decision): boolean {
   return d === 'reject' || d === 'suspend' || d === 'ask-to-fix'
 }
 
+/** Send back and Ask to fix: the owner gets fixed reasons (in their language) and an optional note. Suspend: a reason. */
+export function usesReasonCodes(d: Decision): boolean {
+  return d === 'reject' || d === 'ask-to-fix'
+}
+
+export interface ReasonErrors {
+  reasonCodes?: string
+  reason?: string
+}
+
+/**
+ * Checks ticked reasons and the owner's note as the backend does: at least one reason; the note is optional (2–200
+ * when written) but needed with Other.
+ */
+export function checkReasons(codes: ReviewReason[], note: string): ReasonErrors {
+  const errors: ReasonErrors = {}
+  if (codes.length === 0) errors.reasonCodes = 'Tick at least one reason'
+  const other = codes.includes('OTHER')
+  if (other || clean(note) || hasHiddenCharacters(note)) {
+    const n = checkText(note, REASON_MAX, 'Write what is wrong: you ticked Other')
+    if (n) errors.reason = n
+  }
+  return errors
+}
+
 /** A starting reason from the ticked items, in checklist order ("Shop was shut. Owner photo unclear."). */
 export function reasonFromChecklist(items: ChecklistItem[]): string {
   const picked = CHECKLIST.filter((c) => items.includes(c) && c !== 'OTHER')
@@ -66,6 +91,7 @@ export function reasonFromChecklist(items: ChecklistItem[]): string {
 }
 
 export interface DecisionErrors {
+  reasonCodes?: string
   reason?: string
   note?: string
 }
@@ -118,10 +144,13 @@ export function checkText(text: string, max: number, empty: string): string | un
   return undefined
 }
 
-/** Checks a decision form the way the backend does: reason 2–200 (when needed), note 2–500 when given. */
-export function checkDecision(d: Decision, reason: string, note: string): DecisionErrors {
-  const errors: DecisionErrors = {}
-  if (needsReason(d)) {
+/**
+ * Checks a decision form the way the backend does: Send back and Ask to fix, at least one reason ticked and the owner's
+ * note optional (needed with Other); Suspend, a reason 2–200; the internal note 2–500 when given.
+ */
+export function checkDecision(d: Decision, reason: string, note: string, codes: ReviewReason[] = []): DecisionErrors {
+  const errors: DecisionErrors = usesReasonCodes(d) ? checkReasons(codes, reason) : {}
+  if (needsReason(d) && !usesReasonCodes(d)) {
     const r = checkText(reason, REASON_MAX, 'Write a reason for the owner')
     if (r) errors.reason = r
   }
