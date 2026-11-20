@@ -362,3 +362,14 @@ test('a resolved ticket on the screen is not re-read every 30 s; an open one is'
   await page.clock.fastForward('00:35')
   await expect.poll(() => openReads).toBeGreaterThan(before)
 })
+
+test("a ticket says which language the person reads, when they saved one", async ({ page, context, api }) => {
+  await asSupport(context, api)
+  const t = api.addTicket({ subject: 'Booking not showing', requesterLanguage: 'hi' })
+  const u = api.addTicket({ subject: 'Email question', requesterId: null, requester: 'someone@gmail.com', requesterEmail: 'someone@gmail.com' })
+  await page.goto(`/tickets/${t.id}`)
+  await expect(page.getByText('Reads: Hindi')).toBeVisible()
+  await page.goto(`/tickets/${u.id}`)
+  await expect(page.getByRole('heading', { name: u.number })).toBeVisible()
+  await expect(page.getByText(/^Reads:/)).toHaveCount(0)
+})

@@ -53,6 +53,8 @@ export interface MockTicket {
   version: number
   /** False: the first email's sender couldn't be proven. */
   senderVerified?: boolean
+  /** The person's saved app language (users.language); null or missing: none. */
+  requesterLanguage?: string | null
 }
 
 export interface Call {
@@ -88,6 +90,61 @@ export interface ShopExtra {
 /** A real 20-second video (64×64, VP9 in MP4). */
 const VIDEO = readFileSync(resolve('e2e/fixtures/salon-20s.mp4'))
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+/** ReviewReason on the backend: the fixed reasons for Send back, Ask to fix and declining an address. */
+export const REVIEW_REASONS = [
+  'SHOP_FRONT_PHOTO', 'BOARD_NOT_VISIBLE', 'INSIDE_PHOTOS', 'LICENCE_UNREADABLE', 'LICENCE_NAME_MISMATCH', 'LICENCE_EXPIRED',
+  'LICENCE_WRONG_TYPE', 'ADDRESS_WRONG', 'PIN_WRONG_PLACE', 'SERVICES_MISSING', 'HOURS_MISSING', 'VIDEO_UNCLEAR', 'OWNER_NAME', 'OTHER',
+]
+
+/** Each reason in English, as the owner's notice says it (notices/en.properties, reason.*). OTHER is never listed. */
+export const REASON_ENGLISH: Record<string, string> = {
+  SHOP_FRONT_PHOTO: "the shop front photo isn't clear",
+  BOARD_NOT_VISIBLE: "the name board can't be seen in the photo",
+  INSIDE_PHOTOS: 'photos of the inside are missing or unclear',
+  OWNER_NAME: "the owner's name doesn't match",
+  LICENCE_UNREADABLE: "the trade licence can't be read",
+  LICENCE_NAME_MISMATCH: "the name on the trade licence doesn't match",
+  LICENCE_EXPIRED: 'the trade licence has expired',
+  LICENCE_WRONG_TYPE: "the document isn't a trade licence for a salon",
+  ADDRESS_WRONG: 'the address is wrong',
+  PIN_WRONG_PLACE: 'the pin on the map is in the wrong place',
+  SERVICES_MISSING: 'services or prices are missing',
+  HOURS_MISSING: 'opening hours are missing',
+  VIDEO_UNCLEAR: "the salon video isn't clear",
+}
+
+type Reasons = { codes: string[]; words: string | null }
+
+/**
+ * ShopAdminService.reasons, step for step: `reasonCodes` missing or empty is the old rule (the reason is needed,
+ * details.reason); otherwise at most 14, each known ("unknown reason: X" on details.reasonCodes), repeats dropped
+ * (kept in the order sent); the note (`reason`) optional, 2–200 when given, needed with OTHER.
+ */
+function readReasons(codesInput: unknown, wordsInput: unknown): { problem: Json } | Reasons {
+  const codes: string[] = []
+  if (codesInput !== undefined && codesInput !== null) {
+    if (!Array.isArray(codesInput)) return { problem: { reasonCodes: 'must be a list' } }
+    if (codesInput.length > REVIEW_REASONS.length) return { problem: { reasonCodes: `at most ${REVIEW_REASONS.length} reasons` } }
+    for (const code of codesInput) {
+      if (typeof code !== 'string' || !REVIEW_REASONS.includes(code)) return { problem: { reasonCodes: `unknown reason: ${String(code)}` } }
+      if (!codes.includes(code)) codes.push(code)
+    }
+  }
+  if (codes.length === 0) {
+    // An older admin app (no reasonCodes): the reason is required, as it always was
+    const problem = textProblem(wordsInput, 2, 200)
+    return problem ? { problem: { reason: problem } } : { codes: [], words: cleanText(wordsInput as string) }
+  }
+  const blank = typeof wordsInput !== 'string' || wordsInput.trim() === ''
+  if (!blank) {
+    const problem = textProblem(wordsInput, 2, 200)
+    if (problem) return { problem: { reason: problem } }
+  }
+  const words = blank ? null : cleanText(wordsInput as string)
+  if (codes.includes('OTHER') && words === null) return { problem: { reason: 'say what else to fix' } }
+  return { codes, words }
+}
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 
@@ -303,6 +360,7 @@ export class MockApi {
       version: 3,
       createdAt: '2026-11-01T04:30:00Z',
       ownerPhone: '9811122233',
+      ownerLanguage: null,
       gstin: null,
       udyamNumber: null,
       assignedTo: { id: 'u5', name: 'Ravi Field' },
@@ -353,7 +411,7 @@ export class MockApi {
       case 'PENDING_VISIT':
         return x.approvedBefore ? 'RECHECK' : 'FIRST_VISIT'
       case 'DRAFT':
-        return shop.statusReason ? 'SENT_BACK' : null
+        return shop.statusReason || ((shop.statusReasonCodes as string[] | undefined) ?? []).length ? 'SENT_BACK' : null
       case 'APPROVED':
         return x.rechecking ? 'RECHECK' : 'LIVE'
       case 'SUSPENDED':
@@ -367,7 +425,7 @@ export class MockApi {
 
   private view(shop: Json): Json {
     const x = this.extra.get(shop.id as string)!
-    return { ...shop, group: this.groupOf(shop), statusSince: x.statusSince, waitingForVisit: this.waits(shop), addressRequested: Boolean(x.addressRequest) }
+    return { ...shop, statusReasonCodes: shop.statusReasonCodes ?? [], group: this.groupOf(shop), statusSince: x.statusSince, waitingForVisit: this.waits(shop), addressRequested: Boolean(x.addressRequest) }
   }
 
   /** Waiting for a visit (Shop.waitingForVisit): its first, a reinstated one's, or a live shop's re-check. */
@@ -392,7 +450,7 @@ export class MockApi {
    */
   closeShop(id: string, reason: string | null) {
     const shop = this.shops.find((s) => s.id === id)!
-    Object.assign(shop, { status: 'CLOSED', statusReason: reason, version: (shop.version as number) + 1 })
+    Object.assign(shop, { status: 'CLOSED', statusReason: reason, statusReasonCodes: [], version: (shop.version as number) + 1 })
     const x = this.extra.get(id)!
     x.statusSince = new Date().toISOString()
     x.timeline.unshift({ at: x.statusSince, event: 'CLOSED', byName: shop.ownerName, byAdmin: false, reason, note: null, checklist: [] })
@@ -400,7 +458,7 @@ export class MockApi {
 
   setStatus(id: string, status: Status, reason: string | null = null) {
     const shop = this.shops.find((s) => s.id === id)!
-    Object.assign(shop, { status, statusReason: reason, version: (shop.version as number) + 1 })
+    Object.assign(shop, { status, statusReason: reason, statusReasonCodes: [], version: (shop.version as number) + 1 })
     this.extra.get(id)!.statusSince = new Date().toISOString()
   }
 
@@ -591,7 +649,7 @@ export class MockApi {
         assigneeId: t.assigneeId, assigneeName: names(t.assigneeId), createdAt: t.createdAt, lastMessageAt: t.lastMessageAt,
       })
       const detail = (t: MockTicket) => ({
-        ticket: summary(t), requesterId: t.requesterId, requesterEmail: t.requesterEmail, messages: t.messages,
+        ticket: summary(t), requesterId: t.requesterId, requesterLanguage: t.requesterLanguage ?? null, requesterEmail: t.requesterEmail, messages: t.messages,
         events: t.events, profile: t.profile, earlierTickets: t.requesterId ? this.tickets.filter((x) => x.requesterId === t.requesterId).length - 1 : 0, emailsWaiting: t.emailsWaiting, emailsFailed: t.emailsFailed,
         lastIncomingSeq: Math.max(0, ...t.messages.filter((m) => m.direction === 'IN').map((m) => m.seq as number)),
         version: t.version,
@@ -990,10 +1048,13 @@ export class MockApi {
       // The request body (@Valid) first, then the status, then the version, as the backend
       if (typeof body.version !== 'number') return invalid({ version: 'is required' })
       const bad: Json = {}
-      if (addressPath[2] !== 'address') {
-        const problem = textProblem(body.reason, 2, 200)
-        if (problem) bad.reason = problem
-      } else {
+      // The controller: the note if one is given, else the reason
+      const declined = addressPath[2] !== 'address'
+        ? readReasons(body.reasonCodes, typeof body.note === 'string' && body.note.trim() ? body.note : body.reason)
+        : null
+      if (declined && 'problem' in declined) {
+        Object.assign(bad, declined.problem)
+      } else if (!declined) {
         for (const [k, min, max] of [['addressLine', 5, 200], ['area', 2, 100], ['city', 2, 60]] as const) {
           const problem = textProblem(body[k], min, max)
           if (problem) bad[k] = problem
@@ -1009,7 +1070,9 @@ export class MockApi {
       if (addressPath[2] !== 'address') {
         if (!x.addressRequest) return fail(409, 'NO_ADDRESS_REQUEST', 'No address change waits for this shop any more. Reload.')
         x.addressRequest = null
-        x.timeline.unshift({ at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, note: `Address change declined: ${cleanText(body.reason)}`, checklist: [] })
+        const r = declined as Reasons
+        x.timeline.unshift({ at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, note: r.words ? `Address change declined: ${r.words}` : 'Address change declined',  // ShopAdminService: only the typed words (the codes are kept beside it)
+ checklist: [], reasonCodes: r.codes })
         shop.version = (shop.version as number) + 1
         return ok(200, this.view(shop))
       }
@@ -1059,7 +1122,7 @@ export class MockApi {
       if (action === 'notes' && method === 'POST') {
         const problem = textProblem(body.note, 2, 500)
         if (problem) return invalid({ note: problem })
-        const entry = { at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, note, checklist: [] }
+        const entry = { at: new Date().toISOString(), event: 'NOTE', byName: this.user.name, byAdmin: true, reason: null, reasonCodes: [], note, checklist: [] }
         x.timeline.unshift(entry)
         return ok(201, entry)
       }
@@ -1082,10 +1145,15 @@ export class MockApi {
           return fail(409, 'WRONG_STATUS', `The shop is ${shop.status}.`, { status: shop.status })
         }
         if (body.version !== shop.version) return fail(409, 'SHOP_CHANGED', 'The shop was changed. Reload and check again.')
-        const reason = typeof body.reason === 'string' ? cleanText(body.reason) : ''
-        const details: Json = {}
-        const reasonProblem = needsReason ? textProblem(body.reason, 2, 200) : null
+        // Send back and Ask to fix: fixed reasons and an optional note; Suspend: a reason
+        const withCodes = action === 'reject' || action === 'ask-to-fix'
+        const read = withCodes ? readReasons(body.reasonCodes, body.reason) : null
+        const details: Json = read && 'problem' in read ? { ...read.problem } : {}
+        const reasonProblem = needsReason && !withCodes ? textProblem(body.reason, 2, 200) : null
         if (reasonProblem) details.reason = reasonProblem
+        const reasons: Reasons = read && !('problem' in read)
+          ? read
+          : { codes: [], words: needsReason && typeof body.reason === 'string' ? cleanText(body.reason) : null }
         // A note is optional: empty means none; given, it follows the text rule (2–500).
         const noteProblem = note ? textProblem(body.note, 2, 500) : null
         if (noteProblem) details.note = noteProblem
@@ -1102,7 +1170,9 @@ export class MockApi {
           x.rechecking = false
           x.statusSince = new Date().toISOString()
         }
-        shop.statusReason = needsReason ? reason : null
+        // The note (none with reasons ticked alone: null, as AdminShopResponse.statusReason) and the reasons
+        shop.statusReason = reasons.words || null
+        shop.statusReasonCodes = reasons.codes
         shop.version = (shop.version as number) + 1
         if (action === 'approve') {
           // The owner's waiting address change request is applied with it
@@ -1123,7 +1193,8 @@ export class MockApi {
           event: event[action],
           byName: this.user.name,
           byAdmin: true,
-          reason: needsReason ? reason : null,
+          reason: reasons.words || null,
+          reasonCodes: reasons.codes,
           note: note || null,
           checklist: needsReason && Array.isArray(body.checklist) ? body.checklist : [],
         })
@@ -1424,8 +1495,10 @@ export class MockApi {
     const rest = [...timeline]
       .sort((x, y) => at(y) - at(x) || seq(y) - seq(x))
       .filter((e) => after === null || at(e) < after.at || (at(e) === after.at && seq(e) < after.seq))
-    const items = rest.slice(0, TIMELINE_PAGE)
-    const last = items[items.length - 1]
+    const page = rest.slice(0, TIMELINE_PAGE)
+    const last = page[page.length - 1]
+    // Every entry has its reasons (empty when none), as AdminShopDetail.TimelineEntry
+    const items = page.map((e) => ({ ...e, reasonCodes: e.reasonCodes ?? [] }))
     return { items, next: rest.length > TIMELINE_PAGE ? { afterAt: last.at, afterSeq: seq(last) } : null }
   }
 

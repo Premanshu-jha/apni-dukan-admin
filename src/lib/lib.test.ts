@@ -1,11 +1,13 @@
 import type { LicenceAiUsage } from '../api/types'
-import { CHECKLIST, CHECKLIST_LABELS, checklistFor, eventLabel, GROUP_LABELS, GROUPS, isGroup, isShopType, licenceAiProblem, licenceAiText, licenceCheckText, sinceText, usd } from './labels'
+import { ADDRESS_DECLINE_REASONS, CHECKLIST, CHECKLIST_LABELS, checklistFor, eventLabel, languageName, readsText, REVIEW_REASON_LABELS, REVIEW_REASONS, reviewReasonLabel, reviewReasonsFor, fixReasonsFor, GROUP_LABELS, GROUPS, isGroup, isShopType, licenceAiProblem, licenceAiText, licenceCheckText, sinceText, usd } from './labels'
 import { dateOnly, todayInIndia } from './time'
 import { directionsUrl, distanceLabel, telUrl } from './links'
 import { formatPhone, normalizePhone } from './phone'
 import { isSuperAdmin, isTeam, roleOf, tabsFor } from './roles'
 import {
   checkDecision,
+  checkReasons,
+  usesReasonCodes,
   checkNote,
   checkText,
   clean,
@@ -166,8 +168,8 @@ describe('decisions and form checks', () => {
   })
 
   it('checks a reason of 2–200 (cleaned) only where one is needed, and a note of 2–500 only when given', () => {
-    expect(checkDecision('reject', '   ', '').reason).toBe('Write a reason for the owner')
-    expect(checkDecision('reject', ' a ', '').reason).toBe('Write at least 2 letters or digits')
+    expect(checkDecision('suspend', '   ', '').reason).toBe('Write a reason for the owner')
+    expect(checkDecision('suspend', ' a ', '').reason).toBe('Write at least 2 letters or digits')
     expect(checkDecision('suspend', 'ok', '')).toEqual({})
     expect(checkDecision('suspend', 'x'.repeat(200), '')).toEqual({})
     expect(checkDecision('suspend', 'x'.repeat(201), '').reason).toBe('Keep it under 200 characters (now 201)')
@@ -177,6 +179,61 @@ describe('decisions and form checks', () => {
     expect(checkDecision('approve', '', 'x'.repeat(500))).toEqual({})
     expect(checkDecision('reinstate', '', 'x'.repeat(501)).note).toMatch(/now 501/)
     expect(checkDecision('approve', '', '.').note).toBe('Write at least 2 letters or digits')
+  })
+
+  it('Send back and Ask to fix take ticked reasons and an optional note; Suspend still takes a reason', () => {
+    expect(usesReasonCodes('reject') && usesReasonCodes('ask-to-fix')).toBe(true)
+    expect(usesReasonCodes('suspend') || usesReasonCodes('approve') || usesReasonCodes('reinstate')).toBe(false)
+    // At least one reason; no note needed
+    expect(checkDecision('reject', '', '').reasonCodes).toBe('Tick at least one reason')
+    expect(checkDecision('reject', '', '', ['PIN_WRONG_PLACE'])).toEqual({})
+    expect(checkDecision('ask-to-fix', '', '', ['VIDEO_UNCLEAR', 'HOURS_MISSING'])).toEqual({})
+    // A note given follows the text rule (2–200)
+    expect(checkDecision('reject', ' a ', '', ['ADDRESS_WRONG']).reason).toBe('Write at least 2 letters or digits')
+    expect(checkDecision('reject', 'x'.repeat(201), '', ['ADDRESS_WRONG']).reason).toBe('Keep it under 200 characters (now 201)')
+    expect(checkDecision('reject', 'Shop\u200Bshut', '', ['ADDRESS_WRONG']).reason).toBe('Contains invisible or special characters')
+    // Other needs the note
+    expect(checkDecision('reject', '  ', '', ['OTHER']).reason).toBe('Write what is wrong: you ticked Other')
+    expect(checkDecision('ask-to-fix', 'Board fell down', '', ['OTHER'])).toEqual({})
+    // The internal note is checked as before
+    expect(checkDecision('reject', '', '.', ['OTHER']).note).toBe('Write at least 2 letters or digits')
+    expect(checkReasons([], 'Fine text')).toEqual({ reasonCodes: 'Tick at least one reason' })
+  })
+
+  it('has an English label for every reason, salon-only reasons left out for a kirana, and a short list for addresses', () => {
+    expect(REVIEW_REASONS).toEqual([
+      'SHOP_FRONT_PHOTO', 'BOARD_NOT_VISIBLE', 'INSIDE_PHOTOS', 'LICENCE_UNREADABLE', 'LICENCE_NAME_MISMATCH', 'LICENCE_EXPIRED',
+      'LICENCE_WRONG_TYPE', 'ADDRESS_WRONG', 'PIN_WRONG_PLACE', 'SERVICES_MISSING', 'HOURS_MISSING', 'VIDEO_UNCLEAR', 'OWNER_NAME', 'OTHER',
+    ])
+    for (const r of REVIEW_REASONS) expect(REVIEW_REASON_LABELS[r]).toBeTruthy()
+    expect(reviewReasonsFor('SALON')).toEqual(REVIEW_REASONS)
+    expect(reviewReasonsFor('KIRANA')).toEqual(['SHOP_FRONT_PHOTO', 'BOARD_NOT_VISIBLE', 'INSIDE_PHOTOS', 'ADDRESS_WRONG', 'PIN_WRONG_PLACE', 'OWNER_NAME', 'OTHER'])
+    // Only what fits an address: no photo reasons
+    expect(ADDRESS_DECLINE_REASONS).toEqual(['ADDRESS_WRONG', 'PIN_WRONG_PLACE', 'OTHER'])
+  })
+
+  it('lists the photo and video reasons first for a live re-check, the rest in their order', () => {
+    expect(fixReasonsFor('SALON')).toEqual([
+      'SHOP_FRONT_PHOTO', 'BOARD_NOT_VISIBLE', 'INSIDE_PHOTOS', 'VIDEO_UNCLEAR', 'LICENCE_UNREADABLE', 'LICENCE_NAME_MISMATCH',
+      'LICENCE_EXPIRED', 'LICENCE_WRONG_TYPE', 'ADDRESS_WRONG', 'PIN_WRONG_PLACE', 'SERVICES_MISSING', 'HOURS_MISSING', 'OWNER_NAME', 'OTHER',
+    ])
+    expect(fixReasonsFor('KIRANA')).toEqual(reviewReasonsFor('KIRANA'))
+  })
+
+  it('names a reason for the team afterwards: Other as just Other, an unknown code as is', () => {
+    expect(reviewReasonLabel('PIN_WRONG_PLACE')).toBe('Pin is in the wrong place')
+    expect(reviewReasonLabel('OTHER')).toBe('Other')
+    expect(reviewReasonLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW')
+  })
+
+  it("names the language a person reads, and nothing when none is saved", () => {
+    expect(readsText('te')).toBe('Reads: Telugu')
+    expect(readsText('hi')).toBe('Reads: Hindi')
+    expect(['en', 'hi', 'te', 'mr', 'ta', 'kn'].map(languageName)).toEqual(['English', 'Hindi', 'Telugu', 'Marathi', 'Tamil', 'Kannada'])
+    expect(readsText(null)).toBeNull()
+    expect(readsText(undefined)).toBeNull()
+    // A language added later on the backend: its code, rather than nothing
+    expect(readsText('bn')).toBe('Reads: bn')
   })
 
   it("follows the backend's TextCleaner: hidden characters, NFKC, code points", () => {
