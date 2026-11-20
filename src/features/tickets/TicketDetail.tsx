@@ -6,6 +6,7 @@ import { ApiError, explain, isNetwork } from '../../api/errors'
 import type { TicketDetail as Detail } from '../../api/types'
 import { useAdmin } from '../../app/guards'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill, Sheet, TextArea } from '../../components/ui'
+import { readsText } from '../../lib/labels'
 import { isSuperAdmin } from '../../lib/roles'
 import { storage } from '../../lib/storage'
 import { dateTimeIst } from '../../lib/time'
@@ -258,6 +259,7 @@ function Loaded({ d, stale, refetch }: { d: Detail; stale: boolean; refetch: () 
           <strong>{t.requester}</strong>
           {d.requesterEmail && <span className="text-muted"> · {d.requesterEmail}</span>}
         </p>
+        {readsText(d.requesterLanguage) && <p className="text-sm">{readsText(d.requesterLanguage)}</p>}
         {d.requesterId === null && d.requesterEmail && (
           <p className="text-sm text-muted">
             {d.senderVerified ? "No Clozest account uses this email, so there's no profile to show." : 'Not matched to an account: the sender is unproven.'}

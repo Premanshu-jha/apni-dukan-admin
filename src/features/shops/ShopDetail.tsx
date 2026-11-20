@@ -20,13 +20,14 @@ import type {
 } from '../../api/types'
 import { Photo } from '../../components/Photo'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Page, Pill } from '../../components/ui'
-import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, licenceCheckText, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
+import { CHECKLIST_LABELS, eventLabel, GROUP_LABELS, languageName, licenceCheckText, STATUS_LABELS, STATUS_TONES, TYPE_LABELS } from '../../lib/labels'
 import { directionsUrl, distanceLabel, telUrl } from '../../lib/links'
 import { formatPhone } from '../../lib/phone'
 import { clean, DECISION_LABELS, decisionsFor, liveRecheck, waitingForVisit, type Decision } from '../../lib/rules'
 import { dateIst, dateOnly, dateTimeIst } from '../../lib/time'
 import { clock12, rupees } from '../../lib/salon'
 import { type Conflict, DecisionSheet, type Draft, EMPTY_DRAFT, NoteSheet } from './DecisionSheet'
+import { ToldReasons } from './ReasonPicker'
 
 /** The status a decision leads to: after a lost answer, seeing it on a re-read means the decision went through. */
 const RESULT: Record<Decision, ShopStatus> = {
@@ -37,12 +38,17 @@ const RESULT: Record<Decision, ShopStatus> = {
   'ask-to-fix': 'APPROVED',
 }
 
+/** The same reasons, whatever their order (the backend keeps each once, in the order sent). */
+function sameCodes(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((c) => b.includes(c))
+}
+
 /** Approving a live shop's re-check: it was live all along. */
 const RECHECKED_TEXT = 'Checked. The business stays live; the owner is told.'
 
 const DONE_TEXT: Record<Decision, string> = {
   approve: 'Approved. The business is live now.',
-  reject: 'Sent back to the owner with your reason.',
+  reject: 'Sent back to the owner with the reasons you ticked.',
   suspend: 'Suspended. The owner sees your reason.',
   reinstate: 'Reinstated. It now waits for a re-check visit.',
   'ask-to-fix': 'Sent to the owner. The business stays live and waits here until you approve it.',
@@ -142,8 +148,13 @@ export function ShopDetail() {
       const now = await adminApi.shop(id)
       // A live re-check stays APPROVED: approved only once nothing waits any more
       if (now.shop.status !== RESULT[decision] || (decision === 'approve' && waitingForVisit(now.shop))) return false
-      // Asked for a fix: still waiting, with this reason for the owner (an earlier ask's reason isn't proof)
-      if (decision === 'ask-to-fix' && !(waitingForVisit(now.shop) && now.shop.statusReason === clean(drafts['ask-to-fix']?.reason ?? ''))) return false
+      // Asked for a fix: still waiting, with these reasons and this note for the owner (an earlier ask isn't proof;
+      // no note is null, so ticks alone must match too)
+      if (decision === 'ask-to-fix') {
+        const draft = drafts['ask-to-fix']
+        const sameNote = (now.shop.statusReason ?? '') === clean(draft?.reason ?? '')
+        if (!(waitingForVisit(now.shop) && sameNote && sameCodes(now.shop.statusReasonCodes ?? [], draft?.reasonCodes ?? []))) return false
+      }
       qc.setQueryData<Detail>(keys.shop(id), now)
       decided(decision, now.shop, liveRecheck(shop))
       return true
@@ -248,10 +259,11 @@ export function ShopDetail() {
           fix something (it stays live and waits here).{superAdmin ? ' Suspend only for something serious.' : ''}
         </Banner>
       )}
-      {shop.statusReason && (
-        <p className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">
-          The owner was told: <span className="text-ink">"{shop.statusReason}"</span>
-        </p>
+      {(shop.statusReason || (shop.statusReasonCodes ?? []).length > 0) && (
+        <div className="flex min-w-0 flex-col gap-1 text-sm text-muted [overflow-wrap:anywhere]">
+          <p>The owner was told:</p>
+          <ToldReasons codes={shop.statusReasonCodes ?? []} note={shop.statusReason} />
+        </div>
       )}
 
       {data.addressRequest && (
@@ -319,6 +331,7 @@ export function ShopDetail() {
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <Row label="Owner">{shop.ownerName}</Row>
             <Row label="Phone">{shop.ownerPhone ? `+91 ${formatPhone(shop.ownerPhone)}` : '—'}</Row>
+            {languageName(shop.ownerLanguage) && <Row label="Reads">{languageName(shop.ownerLanguage)}</Row>}
             <Row label="Address">{shop.addressLine}</Row>
             <Row label="Area">{shop.area}</Row>
             <Row label="City">{shop.city}</Row>
@@ -832,10 +845,17 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
           ))}
         </ul>
       )}
-      {entry.reason && (
-        <p>
-          <span className="text-muted">{entry.event === 'CLOSED' ? "Owner's reason: " : 'Owner was told: '}</span>"{entry.reason}"
-        </p>
+      {(entry.reasonCodes ?? []).length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <p className="text-muted">Owner was told:</p>
+          <ToldReasons codes={entry.reasonCodes} note={entry.reason} />
+        </div>
+      ) : (
+        entry.reason && (
+          <p>
+            <span className="text-muted">{entry.event === 'CLOSED' ? "Owner's reason: " : 'Owner was told: '}</span>"{entry.reason}"
+          </p>
+        )
       )}
       {entry.note && (
         <div className="rounded-xl border border-dashed border-brand/50 bg-brand/5 px-3 py-2">
