@@ -6,6 +6,7 @@ import { ApiError, messageOf } from '../../api/errors'
 import { CodeInput } from '../../components/CodeInput'
 import { Banner, Button, Page } from '../../components/ui'
 import { storage } from '../../lib/storage'
+import { lastSent, RESEND_AFTER_S, SENT_KEY, type SentMark } from './adminCodeSent'
 import { useSession } from '../../store/session'
 import { nextAfterSignIn } from './flow'
 import { signOutHere } from './signOut'
@@ -14,23 +15,6 @@ import { signOutHere } from './signOut'
 export function maskEmail(address: string): string {
   const at = address.indexOf('@')
   return at <= 1 ? `***${address.slice(Math.max(at, 0))}` : `${address[0]}***${address.slice(at)}`
-}
-
-/** When the last code was sent, per person: a reload or a second tab doesn't send a new one (which replaces it). */
-const SENT_KEY = 'ada.adminCodeSent'
-/** A code works 10 minutes; within them, opening the screen again doesn't send another. */
-const CODE_LIFE_MS = 10 * 60_000
-const RESEND_AFTER_S = 30
-
-interface SentMark {
-  userId: string
-  at: number
-}
-
-/** When this person's last code was sent, if it still works (within 10 minutes); else null. */
-export function lastSent(userId: string | undefined, now = Date.now()): number | null {
-  const mark = storage.getJson<SentMark>(SENT_KEY)
-  return mark && mark.userId === userId && now - mark.at < CODE_LIFE_MS ? mark.at : null
 }
 
 /**

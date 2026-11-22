@@ -1,5 +1,6 @@
 import type { User } from '../../api/types'
-import { lastSent, maskEmail } from './AdminCodeStep'
+import { maskEmail } from './AdminCodeStep'
+import { lastSent } from './adminCodeSent'
 import { forgetReturn, nextAfterSignIn, rememberReturn } from './flow'
 
 const user = (over: Partial<User> = {}): User => ({
@@ -17,7 +18,9 @@ describe('where sign-in goes next', () => {
   beforeEach(() => localStorage.clear())
 
   it('sends someone not on the team to "/" (the not-for-you screen), never to the email or name steps', () => {
-    expect(nextAfterSignIn(user({ adminRole: 'NONE', admin: false, email: null, emailVerified: false, name: null }))).toBe('/')
+    expect(
+      nextAfterSignIn(user({ adminRole: 'NONE', admin: false, email: null, emailVerified: false, name: null })),
+    ).toBe('/')
     // An older saved session without adminRole counts as not on the team
     expect(nextAfterSignIn(user({ adminRole: undefined, email: null, emailVerified: false }))).toBe('/')
   })
@@ -68,4 +71,3 @@ describe('when the admin code was last sent', () => {
     expect(lastSent(undefined, at)).toBeNull()
   })
 })
-

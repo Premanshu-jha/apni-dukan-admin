@@ -64,6 +64,13 @@ test('the email step: a reload sends no second code, a failed send says so and w
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page).toHaveURL(/\/signin$/)
   expect(await page.evaluate(() => localStorage.getItem('ada.session'))).toBeNull()
+  // Signing in again at once: a new sign-in gets a new code straight away (the old one was for the old sign-in)
+  const before = api.calledTimes('POST', '/api/v1/auth/admin-code/send')
+  await page.getByLabel('Mobile number').fill('9848012345')
+  await page.getByRole('button', { name: 'Send code' }).click()
+  await page.getByLabel('Code').fill('123456')
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(before + 1)
 })
 
 test('taken off the team while on the email step: the not-for-the-team screen, not a stuck step', async ({ page, context, api }) => {

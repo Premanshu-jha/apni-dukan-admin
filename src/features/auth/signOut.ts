@@ -2,6 +2,7 @@ import { forgetTicketDrafts } from '../tickets/labels'
 import type { QueryClient } from '@tanstack/react-query'
 import { authApi } from '../../api/auth'
 import { useSession } from '../../store/session'
+import { forgetAdminCodeSent } from './adminCodeSent'
 import { forgetReturn } from './flow'
 
 /** How long sign-out lets the backend's logout run in the background before giving up on it. */
@@ -34,6 +35,7 @@ export function signOutHere(qc: QueryClient) {
  */
 export function forgetThisPerson(qc: QueryClient) {
   forgetReturn()
+  forgetAdminCodeSent()
   forgetTicketDrafts()
   void qc.cancelQueries()
   qc.clear()
