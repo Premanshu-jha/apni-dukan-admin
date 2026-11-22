@@ -433,3 +433,29 @@ Backend tests here are `LanguagesIntegrationTest` (written `LangIT.<method>`) an
 | 242 | The timeline and "The owner was told" afterwards | `reasonCodes` on each entry; `statusReasonCodes` on the shop | The reasons as pills with their English labels (Other as just "Other", an unknown code as it is), then the note; rows from before V84 show the words as before | LangIT.reasonCodesAreSaved… | unit:lib.test "names a reason for the team afterwards…" | OK-tested |
 | 243 | A help ticket's emails to someone who reads Hindi | Acknowledgement and reply wrapper in Hindi; "[CLZ-…]" kept; the support person's reply as typed | Nothing changes for support: they write as before | HelpdeskIntegrationTest.ourEmailsAreInTheLanguageOfTheirAccount… | — | OK-tested (backend) |
 | 244 | Release order | Backend first; this app needs a partner app that shows the reasons (0.29.0) | Deploy the partner app before this one, or owners see a send back with no words | — | — | OK-untested (a release step) |
+
+## The admin email step (backend V86)
+
+Backend tests here are `AdminCodeIntegrationTest` (written `ACI.<method>`).
+
+| # | Scenario | What the API answers | What the screen does | Backend test | App test | Verdict |
+|---|---|---|---|---|---|---|
+| 245 | An admin signs in with the phone code | Tokens with `user.adminCodeNeeded: true`; admin calls 403 | "Check your email" at once (no admin call made); the code is sent as it opens; the email shown as `a***@example.com` | ACI.aPhoneCodeAloneGivesAnAdminNoAdminPages… | e2e:signin "an admin signs in with phone and code…" | OK-tested |
+| 246 | A wrong code, then the right one | 400 `WRONG_CODE`; then 200 with an access token that has admin access | The error, the box cleared for the next try; then on to the dashboard | ACI same | e2e:signin same | OK-tested |
+| 247 | The code typed while the email is still being sent | — | Checked as soon as it is complete (sending and checking are apart; the box isn't cleared when the email goes out) | — | e2e:signin "a refused refresh signs out…" (types at once) | OK-tested |
+| 248 | 12 hours later the site is opened again | The refresh answers `adminCodeNeeded: true`, no admin access | Back to "Check your email"; after the code, where they were | ACI.after12HoursTheStepIsAskedAgain… | e2e:signin "12 hours after the email step…" | OK-tested |
+| 249 | Send again | 202 (20 a day) | Waits 30 s ("Send again in N s"), then sends a new code | ACI | e2e:signin same | OK-tested |
+| 250 | A new admin with no email yet | — | Email step first, then this step to the address just confirmed, then the name | ACI.customersNeverSeeTheStep… (409 EMAIL_REQUIRED) | e2e:signin "a new admin without a verified email…"; unit:flow "puts the admin email step after the email…" | OK-tested |
+| 251 | The email stopped being verified meanwhile | 409 `EMAIL_REQUIRED` (only on send) | Back to the email step | ACI same | — | OK-untested (rare) |
+| 257 | The screen opened again within 10 minutes (a reload, back from the email app, a second tab) | No new code (a new one would replace the one in the inbox); after a sign-out or a new sign-in, a new code at once (the old one was for the old sign-in) | "We sent it to … at 12:05 pm"; Send again counts down what's left of the 30 s | — | e2e:signin "the email step: a reload sends no second code…"; unit:flow "when the admin code was last sent…" | OK-tested |
+| 258 | Sending fails (429 too many, 503 email down) | The error, with `Retry-After` on a 429 | "We couldn't send the code. <why>"; Send again waits the backend's time | ACI | e2e:signin same | OK-tested |
+| 259 | Can't open that inbox, a shared phone, or not you | — | "Ask the super admin to check the email on the Team page", and Sign out on the screen | — | e2e:signin same (Sign out) | OK-tested |
+| 260 | Taken off the team while on the step | 403 `NOT_AN_ADMIN` | "This is for the Clozest team" (not a stuck step) | ACI.after12Hours… | e2e:signin "taken off the team while on the email step…" | OK-tested |
+| 261 | Trying to change their own email (a stolen SIM's way round the step) | 403 `ADMIN_EMAIL` (an admin's email is set on the Team page) | The email step shows the team's address read-only ("Set by the super admin on the Team page"), no Change email | ACI.aSimThiefCantMoveTheEmail… | — | OK-tested (backend) |
+| 262 | The 12 hours end while filling a review form | The submit's refresh has no admin access | Back to the email step, then to the same page; what was typed in the form is lost | — | — | INCONVENIENCE (rare: once per 12 h; a draft keeper for the decision sheets would fix it, not in this round) |
+| 252 | A shop link opened while signed out | — | Phone code → email code → the shop | — | e2e:signin "a shop link opened while signed out…" | OK-tested |
+| 253 | Account recovery | A new sign-in: the step too | "Check your email" after recovery | — | e2e:signin "recovery with email…" | OK-tested |
+| 254 | Someone not on the team | `adminCodeNeeded` false | Never the step; "This is for the Clozest team" | ACI.customersNeverSeeTheStep… | unit:flow same | OK-tested |
+| 255 | Another tab of the same browser | Same sign-in (session): it shares the step | The other tab follows the saved session and refreshes into admin access; opened at the same time, it doesn't send a second code (row 257) | ACI.theCodeIsForTheDevice… (per sign-in) | — | OK-untested |
+| 256 | Release order | An older backend never sends `adminCodeNeeded` | Deploy this app first, then the backend; nothing changes until the backend is live | — | — | OK-untested (a release step) |
+

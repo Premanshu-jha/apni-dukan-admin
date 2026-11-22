@@ -17,9 +17,70 @@ test('an admin signs in with phone and code and lands on the dashboard', async (
   // The wrong code is really cleared, so the next one is typed into an empty box
   await expect(page.getByLabel('Code')).toHaveValue('')
   await page.getByLabel('Code').pressSequentially('123456')
+  // The phone code alone doesn't open the admin pages: a code to the admin's email, sent by itself
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await expect(page.getByText('We sent it to a***@example.com')).toBeVisible()
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(1)
+  expect(api.calledTimes('GET', '/api/v1/admin/me')).toBe(0)
+  await page.getByLabel('Code from your email').fill('111111')
+  await expect(page.getByText('That code is not correct')).toBeVisible()
+  await expect(page.getByLabel('Code from your email')).toHaveValue('')
+  await page.getByLabel('Code from your email').pressSequentially(MockApi.ADMIN_CODE)
   await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   expect(api.calls.find((c) => c.path === '/api/v1/auth/otp/send')?.body).toMatchObject({ phone: '9848012345' })
   expect(api.calledTimes('GET', '/api/v1/admin/me')).toBeGreaterThan(0)
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(1)
+})
+
+test('12 hours after the email step it is asked again, and Send again waits 30 seconds', async ({ page, context, api }) => {
+  await atDashboard(page, context, api, 'ADMIN')
+  api.expireAdminCodes()
+  // Opened again later: the sign-in is refreshed, and the step is asked again
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Send again in \d+ s/ })).toBeDisabled()
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(1)
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
+  await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
+  const saved = JSON.parse((await page.evaluate(() => localStorage.getItem('ada.session')))!)
+  expect(saved.user.adminCodeNeeded).toBe(false)
+})
+
+test('the email step: a reload sends no second code, a failed send says so and waits, and Sign out is there', async ({ page, context, api }) => {
+  await atDashboard(page, context, api, 'ADMIN')
+  api.expireAdminCodes()
+  await page.reload()
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  // Opened again (a reload, the email app and back): the code already in the inbox keeps working, no new one
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(1)
+  // Too many codes: what happened, and Send again waits as long as the backend says
+  await page.evaluate(() => localStorage.removeItem('ada.adminCodeSent'))
+  api.failOnce.set('/auth/admin-code/send', { status: 429, code: 'TOO_MANY_REQUESTS', message: 'Too many codes today. Try again later.' })
+  await page.reload()
+  await expect(page.getByText("We couldn't send the code. Too many codes today. Try again later.")).toBeVisible()
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await expect(page).toHaveURL(/\/signin$/)
+  expect(await page.evaluate(() => localStorage.getItem('ada.session'))).toBeNull()
+  // Signing in again at once: a new sign-in gets a new code straight away (the old one was for the old sign-in)
+  const before = api.calledTimes('POST', '/api/v1/auth/admin-code/send')
+  await page.getByLabel('Mobile number').fill('9848012345')
+  await page.getByRole('button', { name: 'Send code' }).click()
+  await page.getByLabel('Code').fill('123456')
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(before + 1)
+})
+
+test('taken off the team while on the email step: the not-for-the-team screen, not a stuck step', async ({ page, context, api }) => {
+  await atDashboard(page, context, api, 'ADMIN')
+  api.expireAdminCodes()
+  await page.reload()
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  api.user = { ...api.user, adminRole: 'NONE', admin: false }
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
 })
 
 test('someone not on the team sees "This is for the Clozest team" and can only sign out; no admin call is made', async ({ page, api }) => {
@@ -62,6 +123,9 @@ test('a new admin without a verified email does the email and name steps first',
   await page.getByLabel('Email').fill('asha@example.com')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByLabel('Code').fill('654321')
+  // Then the admin email step, to the address just confirmed
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
   await expect(page.getByRole('heading', { name: 'What should we call you?' })).toBeVisible()
   await page.getByLabel('Your name').fill('Asha')
   await page.getByRole('button', { name: 'Done' }).click()
@@ -81,6 +145,9 @@ test('recovery with email: codes to the email and the new number, then in', asyn
   await expect(page.getByText('A code is not right.')).toBeVisible()
   await page.getByLabel('Email code').fill('654321')
   await page.getByRole('button', { name: 'Recover account' }).click()
+  // A recovered account is a new sign-in: the admin email step too
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
   await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   expect(api.calls.find((c) => c.path === '/api/v1/auth/recover/complete')?.body).toMatchObject({ email: 'asha@example.com', newPhone: '9848012345' })
 })
@@ -173,6 +240,7 @@ async function signInAgainWithListFailing(page: Page, api: MockApi) {
   await page.getByLabel('Mobile number').fill('9848012345')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByLabel('Code').fill('123456')
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
   await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()
   api.failOnce.set('/admin/shops', { status: 400, code: 'BAD', message: 'The list could not be read.' })
   await page.getByRole('link', { name: /Waiting for first visit/ }).click()
@@ -197,6 +265,8 @@ test('a shop link opened while signed out is kept by the guard and opened after 
   await page.getByLabel('Mobile number').fill('9848012345')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByLabel('Code').fill('123456')
+  // The admin email step comes in between, and the link is still opened after it
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
   await expect(page).toHaveURL(new RegExp(`/shops/${shop.id}$`))
   await expect(page.getByRole('heading', { name: /Gupta General Store/ })).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('ada.returnTo'))).toBeNull()
@@ -218,7 +288,7 @@ test('a test account is signed out when its number is removed while it is signed
   await api.attach(boss)
   const bossUser = { id: 'u0', phone: '9000000001', name: 'Meera Super', email: 'm@example.com', emailVerified: true, admin: true, adminRole: 'SUPER_ADMIN' as const }
   const saved = JSON.stringify({ refreshToken: 'refresh-boss', user: bossUser })
-  api.refreshTokens.set('refresh-boss', 'live')
+  api.verifiedRefresh('refresh-boss')
   await boss.addInitScript((s) => localStorage.setItem('ada.session', s), saved)
   const bossPage = await boss.newPage()
   // The fake backend serves one person at a time: be the super admin while the other phone acts

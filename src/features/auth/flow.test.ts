@@ -1,4 +1,6 @@
 import type { User } from '../../api/types'
+import { maskEmail } from './AdminCodeStep'
+import { lastSent } from './adminCodeSent'
 import { forgetReturn, nextAfterSignIn, rememberReturn } from './flow'
 
 const user = (over: Partial<User> = {}): User => ({
@@ -16,7 +18,9 @@ describe('where sign-in goes next', () => {
   beforeEach(() => localStorage.clear())
 
   it('sends someone not on the team to "/" (the not-for-you screen), never to the email or name steps', () => {
-    expect(nextAfterSignIn(user({ adminRole: 'NONE', admin: false, email: null, emailVerified: false, name: null }))).toBe('/')
+    expect(
+      nextAfterSignIn(user({ adminRole: 'NONE', admin: false, email: null, emailVerified: false, name: null })),
+    ).toBe('/')
     // An older saved session without adminRole counts as not on the team
     expect(nextAfterSignIn(user({ adminRole: undefined, email: null, emailVerified: false }))).toBe('/')
   })
@@ -30,10 +34,40 @@ describe('where sign-in goes next', () => {
     expect(nextAfterSignIn(user())).toBe('/')
   })
 
+  it('puts the admin email step after the email and before the name, and only for someone who needs it', () => {
+    expect(nextAfterSignIn(user({ adminCodeNeeded: true }))).toBe('/welcome/admin-code')
+    expect(nextAfterSignIn(user({ adminCodeNeeded: true, name: null }))).toBe('/welcome/admin-code')
+    // No verified email yet: that first (the code goes there)
+    expect(nextAfterSignIn(user({ adminCodeNeeded: true, email: null, emailVerified: false }))).toBe('/welcome/email')
+    expect(nextAfterSignIn(user({ adminCodeNeeded: false }))).toBe('/')
+    // Not on the team: never
+    expect(nextAfterSignIn(user({ adminRole: 'NONE', admin: false, adminCodeNeeded: true }))).toBe('/')
+  })
+
   it('never remembers sign-in pages or another site', () => {
     rememberReturn('/signin/code')
     expect(nextAfterSignIn(user())).toBe('/')
     localStorage.setItem('ada.returnTo', '//evil.example')
     expect(nextAfterSignIn(user())).toBe('/')
+  })
+})
+
+describe('the email shown on the admin email step', () => {
+  it('keeps the first letter and the domain only', () => {
+    expect(maskEmail('asha@example.com')).toBe('a***@example.com')
+    expect(maskEmail('a@x.in')).toBe('***@x.in')
+  })
+})
+
+describe('when the admin code was last sent', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('counts for 10 minutes and for the same person only', () => {
+    const at = Date.parse('2026-11-22T06:00:00Z')
+    localStorage.setItem('ada.adminCodeSent', JSON.stringify({ userId: 'u1', at }))
+    expect(lastSent('u1', at + 9 * 60_000)).toBe(at)
+    expect(lastSent('u1', at + 10 * 60_000)).toBeNull()
+    expect(lastSent('u2', at + 60_000)).toBeNull()
+    expect(lastSent(undefined, at)).toBeNull()
   })
 })

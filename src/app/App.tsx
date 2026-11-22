@@ -1,5 +1,6 @@
 import { Link, Route, Routes } from 'react-router'
 import { EmptyState, Page } from '../components/ui'
+import { AdminCodeStep } from '../features/auth/AdminCodeStep'
 import { CodeStep } from '../features/auth/CodeStep'
 import { EmailStep } from '../features/auth/EmailStep'
 import { NameStep } from '../features/auth/NameStep'
@@ -29,6 +30,7 @@ export function App() {
         </Route>
         <Route element={<FinishingProfile />}>
           <Route path="/welcome/email" element={<EmailStep />} />
+          <Route path="/welcome/admin-code" element={<AdminCodeStep />} />
           <Route path="/welcome/name" element={<NameStep />} />
         </Route>
       </Route>

@@ -94,8 +94,8 @@ reviews walk the list against the code.
 flowchart TD
   A["Signed in"] --> B{"adminRole in the sign-in"}
   B -- "NONE" --> N["This is for the Clozest team (Check again, Sign out)"]
-  B -- "ADMIN or SUPER_ADMIN" --> C{"Email and name done?"}
-  C -- "no" --> W["Email step, name step"]
+  B -- "ADMIN or SUPER_ADMIN" --> C{"Email, this device's email code (every 12 h) and name done?"}
+  C -- "no" --> W["Email step, admin email code, name step"]
   C -- "yes" --> D{"GET /admin/me"}
   W --> D
   D -- "403 or 404 (taken off the team)" --> N
@@ -264,6 +264,20 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### 0.20.0 — 2026-11-22
+
+Needs the backend with V86 (the admin email step). **Deploy this app first, then the backend:** with an older
+backend nothing changes here (it never says a code is needed).
+
+- **The admin email step:** after the phone code, the admin pages ask for a code sent to your verified email
+  ("Check your email", `/welcome/admin-code`), on each device you sign in on and again every 12 hours. The code is
+  sent as the screen opens; "Send again" after 30 seconds; the email shown as `a***@example.com`. A stolen phone or a
+  copied SIM alone no longer opens the admin pages. It comes after the email step (a new admin confirms their email
+  first) and before the name; where you were going (a shop link) is kept. Recovering an account asks for it too.
+  Opened again within 10 minutes (a reload, a second tab), it sends no new code, so the one in the inbox keeps
+  working. A failed send says why and waits as long as the backend asks. Sign out is on the screen, with "ask the
+  super admin" for an inbox you can't open. Taken off the team meanwhile: the not-for-the-team screen.
 
 ### 0.19.0 — 2026-11-20
 

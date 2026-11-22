@@ -19,6 +19,18 @@ export interface User {
   admin: boolean
   /** Missing on a session saved by an older backend: treated as NONE. */
   adminRole?: AdminRole
+  /**
+   * An admin whose sign-in on this device still has to pass the email step (a code to their verified email) before
+   * the admin pages open; asked again 12 hours after it was passed. Missing from an older backend: not needed.
+   */
+  adminCodeNeeded?: boolean
+}
+
+/** After the email step: a new access token that opens the admin pages (the refresh token stays the same). */
+export interface AdminAccess {
+  accessToken: string
+  accessExpiresAt: string
+  user: User
 }
 
 export interface Tokens {

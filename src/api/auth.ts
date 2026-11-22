@@ -1,6 +1,6 @@
 import { deviceName } from '../lib/device'
 import { api } from './client'
-import type { Tokens, User } from './types'
+import type { AdminAccess, Tokens, User } from './types'
 
 const A = '/api/v1/auth'
 
@@ -15,6 +15,9 @@ export const authApi = {
   rename: (name: string) => api<User>('PATCH', `${A}/me`, { body: { name } }),
   sendEmailCode: (email: string) => api<void>('POST', `${A}/email/send-code`, { body: { email, phoneCode: null } }),
   verifyEmail: (email: string, code: string) => api<User>('POST', `${A}/email/verify`, { body: { email, code } }),
+  /** The email step: a code to the admin's verified email, for this browser's sign-in only. */
+  sendAdminCode: () => api<void>('POST', `${A}/admin-code/send`),
+  verifyAdminCode: (code: string) => api<AdminAccess>('POST', `${A}/admin-code/verify`, { body: { code } }),
   startRecovery: (email: string, newPhone: string, captchaToken: string | null) =>
     api<void>('POST', `${A}/recover/start`, { body: { email, newPhone, captchaToken }, auth: false }),
   completeRecovery: (email: string, emailCode: string, newPhone: string, phoneCode: string) =>

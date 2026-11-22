@@ -30,6 +30,8 @@ export interface MockUser {
   adminRole: AdminRole
   /** An ADMIN's designation (FIELD_AGENT when missing). */
   designation?: 'FIELD_AGENT' | 'SUPPORT'
+  /** Per device, as the backend answers it (never stored on the person) */
+  adminCodeNeeded?: boolean
 }
 
 /** A support ticket as the fake keeps it: the TicketDetail fields, plus who it's with. */
@@ -280,6 +282,14 @@ export class MockApi {
   /** Access token → the adminRole it was issued with (as the real token's claim). */
   private access = new Map<string, AdminRole>()
   refreshTokens = new Map<string, 'live' | 'rotated'>()
+  /** Refresh token → the device sign-in (session) it belongs to, kept through every swap, as the backend's "sid". */
+  private sessionOf = new Map<string, number>()
+  /** Access token → its session. */
+  private accessSession = new Map<string, number>()
+  /** Sessions that passed the admin email step (within 12 hours): the backend's admin_sessions. */
+  private adminVerified = new Set<number>()
+  /** The code in the admin sign-in email. */
+  static readonly ADMIN_CODE = '246810'
 
   /** A team member as the backend answers it; an ADMIN is a field agent. */
   static teamMember(over: Json): Json {
@@ -462,26 +472,56 @@ export class MockApi {
     this.extra.get(id)!.statusSince = new Date().toISOString()
   }
 
-  private tokens() {
+  /** The person as the backend answers them on this device: an admin's adminCodeNeeded until the email step. */
+  private userFor(session: number): MockUser {
+    return { ...this.user, adminCodeNeeded: this.user.adminRole !== 'NONE' && !this.adminVerified.has(session) }
+  }
+
+  /** An access token for this session: admin access only once its email step is passed (as the backend's "adm"). */
+  private accessToken(session: number): string {
     const access = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ sub: this.user.id, adminRole: this.user.adminRole })).toString('base64url')}.sig${++this.n}`
+    this.access.set(access, this.adminVerified.has(session) ? this.user.adminRole : 'NONE')
+    this.accessSession.set(access, session)
+    return access
+  }
+
+  /** @param session the device sign-in: a new one for a new sign-in, the same one through every refresh */
+  private tokens(session: number = ++this.n) {
+    const access = this.accessToken(session)
     const refresh = `refresh-${++this.n}`
-    this.access.set(access, this.user.adminRole)
     this.refreshTokens.set(refresh, 'live')
+    this.sessionOf.set(refresh, session)
     return {
       accessToken: access,
       accessExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
       refreshToken: refresh,
       refreshExpiresAt: new Date(Date.now() + 30 * 86400_000).toISOString(),
-      user: this.user,
+      user: this.userFor(session),
       newUser: this.user.name === null,
     }
   }
 
-  /** A saved session for the app to pick up (as if the person signed in earlier). */
+  /** A saved session for the app to pick up (as if the person signed in earlier and passed the email step). */
   savedSession(): string {
     const refresh = `refresh-saved-${++this.n}`
+    const session = ++this.n
     this.refreshTokens.set(refresh, 'live')
-    return JSON.stringify({ refreshToken: refresh, user: this.user })
+    this.sessionOf.set(refresh, session)
+    this.adminVerified.add(session)
+    return JSON.stringify({ refreshToken: refresh, user: this.userFor(session) })
+  }
+
+  /** A refresh token saved by a test itself, for a device that passed the email step. */
+  verifiedRefresh(refresh: string) {
+    const session = ++this.n
+    this.refreshTokens.set(refresh, 'live')
+    this.sessionOf.set(refresh, session)
+    this.adminVerified.add(session)
+  }
+
+  /** 12 hours passed since every device's email step: the next refresh asks for it again. */
+  expireAdminCodes() {
+    this.adminVerified.clear()
   }
 
   /** Ends every access token now (as if they expired): the next call must refresh. */
@@ -581,7 +621,7 @@ export class MockApi {
       const covered = this.testModeOn() && this.testPhones.some((t) => t.phone === this.user.phone)
       if (this.signedInAsTestAccount && !covered) return fail(401, 'TEST_MODE_OFF', 'Test mode is off for this number. Sign in again.')
       this.refreshTokens.set(body.refreshToken, 'rotated')
-      return ok(200, this.tokens())
+      return ok(200, this.tokens(this.sessionOf.get(body.refreshToken)))
     }
     if (p === '/auth/logout') {
       this.refreshTokens.set(body.refreshToken, 'rotated')
@@ -608,13 +648,24 @@ export class MockApi {
 
     if (p === '/auth/me' && method === 'PATCH') {
       this.user = { ...this.user, name: body.name }
-      return ok(200, this.user)
+      return ok(200, this.userFor(this.accessSession.get(token) ?? -1))
+    }
+    if (p === '/auth/admin-code/send' || p === '/auth/admin-code/verify') {
+      if (this.user.adminRole === 'NONE') return fail(403, 'NOT_AN_ADMIN', 'This is only for the Clozest team.')
+      if (p.endsWith('/send')) {
+        if (!this.user.emailVerified) return fail(409, 'EMAIL_REQUIRED', 'Add and confirm your email first: the admin sign-in code goes there.')
+        return ok(202)
+      }
+      if (body.code !== MockApi.ADMIN_CODE) return fail(400, 'WRONG_CODE', 'That code is not correct')
+      const session = this.accessSession.get(token)!
+      this.adminVerified.add(session)
+      return ok(200, { accessToken: this.accessToken(session), accessExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), user: this.userFor(session) })
     }
     if (p === '/auth/email/send-code') return ok(202)
     if (p === '/auth/email/verify') {
       if (body.code !== '654321') return fail(400, 'WRONG_CODE', 'That code is not right.')
       this.user = { ...this.user, email: body.email, emailVerified: true }
-      return ok(200, this.user)
+      return ok(200, this.userFor(this.accessSession.get(token) ?? -1))
     }
 
     if (!p.startsWith('/admin/')) return fail(404, 'NOT_FOUND', 'Not found.')

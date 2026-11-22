@@ -8,6 +8,7 @@ import { TURNSTILE_SITE_KEY } from '../../lib/config'
 import { Banner, Button, Field, Page } from '../../components/ui'
 import { formatPhone, looksLikeEmail, normalizePhone } from '../../lib/phone'
 import { useSession } from '../../store/session'
+import { forgetAdminCodeSent } from './adminCodeSent'
 import { nextAfterSignIn } from './flow'
 
 /**
@@ -52,6 +53,7 @@ export function RecoverStep() {
     setError(null)
     try {
       const tokens = await authApi.completeRecovery(started.email, emailCode, started.phone, phoneCode)
+      forgetAdminCodeSent() // a new sign-in: a code sent for the old one won't work
       signIn(tokens)
       navigate(nextAfterSignIn(tokens.user), { replace: true })
     } catch (err) {

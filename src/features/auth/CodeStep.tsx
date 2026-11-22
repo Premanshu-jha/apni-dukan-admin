@@ -8,6 +8,7 @@ import { TURNSTILE_SITE_KEY } from '../../lib/config'
 import { Banner, Button, Page } from '../../components/ui'
 import { formatPhone } from '../../lib/phone'
 import { useSession } from '../../store/session'
+import { forgetAdminCodeSent } from './adminCodeSent'
 import { nextAfterSignIn } from './flow'
 
 const RESEND_AFTER = 30
@@ -39,6 +40,7 @@ export function CodeStep() {
     setError(null)
     try {
       const tokens = await authApi.verifyCode(phone!, value)
+      forgetAdminCodeSent() // a new sign-in: a code sent for the old one won't work
       signIn(tokens)
       navigate(nextAfterSignIn(tokens.user), { replace: true })
     } catch (err) {
