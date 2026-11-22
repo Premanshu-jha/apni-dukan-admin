@@ -275,6 +275,9 @@ backend nothing changes here (it never says a code is needed).
   sent as the screen opens; "Send again" after 30 seconds; the email shown as `a***@example.com`. A stolen phone or a
   copied SIM alone no longer opens the admin pages. It comes after the email step (a new admin confirms their email
   first) and before the name; where you were going (a shop link) is kept. Recovering an account asks for it too.
+  Opened again within 10 minutes (a reload, a second tab), it sends no new code, so the one in the inbox keeps
+  working. A failed send says why and waits as long as the backend asks. Sign out is on the screen, with "ask the
+  super admin" for an inbox you can't open. Taken off the team meanwhile: the not-for-the-team screen.
 
 ### 0.19.0 — 2026-11-20
 
