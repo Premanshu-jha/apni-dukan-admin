@@ -77,7 +77,7 @@ test('taken off the team while on the email step: the not-for-the-team screen, n
   await atDashboard(page, context, api, 'ADMIN')
   api.expireAdminCodes()
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
   api.user = { ...api.user, adminRole: 'NONE', admin: false }
   await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
   await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
