@@ -23,6 +23,8 @@ interface SessionState {
   generation: number
   signIn: (tokens: Tokens) => void
   setUser: (user: User) => void
+  /** After the email step: the new access token that opens the admin pages, and the person as the backend sent it. */
+  grantAdmin: (accessToken: string, user: User) => void
   signOut: () => void
   /** Called once at start-up: signed out if nothing was saved, otherwise waits for the first refresh. */
   restore: () => void
@@ -51,6 +53,11 @@ export const useSession = create<SessionState>((set, get) => ({
     const { refreshToken } = get()
     if (refreshToken) storage.setJson(KEY, { refreshToken, user } satisfies Saved)
     set({ user })
+  },
+
+  grantAdmin: (accessToken, user) => {
+    get().setUser(user)
+    set({ accessToken })
   },
 
   signOut: () => {
@@ -113,11 +120,17 @@ export function followOtherTabs(personGone: () => void = () => {}) {
   })
 }
 
-/** What the person still has to give before they can use the app. Email first, name last. */
-export function missingSteps(user: User | null): Array<'email' | 'name'> {
+export type Step = 'email' | 'admin-code' | 'name'
+
+/**
+ * What the person still has to do before they can use the app: their email first, then (each sign-in, and every 12
+ * hours) the code sent to it, then their name.
+ */
+export function missingSteps(user: User | null): Step[] {
   if (!user) return []
-  const missing: Array<'email' | 'name'> = []
+  const missing: Step[] = []
   if (!user.email || !user.emailVerified) missing.push('email')
+  else if (user.adminCodeNeeded) missing.push('admin-code')
   if (!user.name || user.name.trim().length < 2) missing.push('name')
   return missing
 }

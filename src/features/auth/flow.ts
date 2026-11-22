@@ -24,8 +24,7 @@ export function forgetReturn() {
 export function nextAfterSignIn(user: User): string {
   if (!isTeam(roleOf(user))) return '/'
   const missing = missingSteps(user)
-  if (missing[0] === 'email') return '/welcome/email'
-  if (missing[0] === 'name') return '/welcome/name'
+  if (missing.length) return `/welcome/${missing[0]}`
   const back = storage.get(RETURN_KEY)
   return back && back.startsWith('/') && !back.startsWith('//') ? back : '/'
 }
