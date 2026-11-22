@@ -652,8 +652,10 @@ export class MockApi {
     }
     if (p === '/auth/admin-code/send' || p === '/auth/admin-code/verify') {
       if (this.user.adminRole === 'NONE') return fail(403, 'NOT_AN_ADMIN', 'This is only for the Clozest team.')
-      if (!this.user.emailVerified) return fail(409, 'EMAIL_REQUIRED', 'Add and confirm your email first: the admin sign-in code goes there.')
-      if (p.endsWith('/send')) return ok(202)
+      if (p.endsWith('/send')) {
+        if (!this.user.emailVerified) return fail(409, 'EMAIL_REQUIRED', 'Add and confirm your email first: the admin sign-in code goes there.')
+        return ok(202)
+      }
       if (body.code !== MockApi.ADMIN_CODE) return fail(400, 'WRONG_CODE', 'That code is not correct')
       const session = this.accessSession.get(token)!
       this.adminVerified.add(session)

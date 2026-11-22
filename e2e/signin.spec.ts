@@ -46,6 +46,36 @@ test('12 hours after the email step it is asked again, and Send again waits 30 s
   expect(saved.user.adminCodeNeeded).toBe(false)
 })
 
+test('the email step: a reload sends no second code, a failed send says so and waits, and Sign out is there', async ({ page, context, api }) => {
+  await atDashboard(page, context, api, 'ADMIN')
+  api.expireAdminCodes()
+  await page.reload()
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  // Opened again (a reload, the email app and back): the code already in the inbox keeps working, no new one
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  await expect(page.getByText(/We sent it to a\*\*\*@example\.com at/)).toBeVisible()
+  expect(api.calledTimes('POST', '/api/v1/auth/admin-code/send')).toBe(1)
+  // Too many codes: what happened, and Send again waits as long as the backend says
+  await page.evaluate(() => localStorage.removeItem('ada.adminCodeSent'))
+  api.failOnce.set('/auth/admin-code/send', { status: 429, code: 'TOO_MANY_REQUESTS', message: 'Too many codes today. Try again later.' })
+  await page.reload()
+  await expect(page.getByText("We couldn't send the code. Too many codes today. Try again later.")).toBeVisible()
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await expect(page).toHaveURL(/\/signin$/)
+  expect(await page.evaluate(() => localStorage.getItem('ada.session'))).toBeNull()
+})
+
+test('taken off the team while on the email step: the not-for-the-team screen, not a stuck step', async ({ page, context, api }) => {
+  await atDashboard(page, context, api, 'ADMIN')
+  api.expireAdminCodes()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
+  api.user = { ...api.user, adminRole: 'NONE', admin: false }
+  await page.getByLabel('Code from your email').fill(MockApi.ADMIN_CODE)
+  await expect(page.getByRole('heading', { name: 'This is for the Clozest team' })).toBeVisible()
+})
+
 test('someone not on the team sees "This is for the Clozest team" and can only sign out; no admin call is made', async ({ page, api }) => {
   // A brand-new account (no email, no name) that isn't an admin: no email or name steps either.
   api.user = { ...MockApi.completeUser('NONE'), name: null, email: null, emailVerified: false }

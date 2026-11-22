@@ -1,5 +1,5 @@
 import type { User } from '../../api/types'
-import { maskEmail } from './AdminCodeStep'
+import { lastSent, maskEmail } from './AdminCodeStep'
 import { forgetReturn, nextAfterSignIn, rememberReturn } from './flow'
 
 const user = (over: Partial<User> = {}): User => ({
@@ -55,3 +55,17 @@ describe('the email shown on the admin email step', () => {
     expect(maskEmail('a@x.in')).toBe('***@x.in')
   })
 })
+
+describe('when the admin code was last sent', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('counts for 10 minutes and for the same person only', () => {
+    const at = Date.parse('2026-11-22T06:00:00Z')
+    localStorage.setItem('ada.adminCodeSent', JSON.stringify({ userId: 'u1', at }))
+    expect(lastSent('u1', at + 9 * 60_000)).toBe(at)
+    expect(lastSent('u1', at + 10 * 60_000)).toBeNull()
+    expect(lastSent('u2', at + 60_000)).toBeNull()
+    expect(lastSent(undefined, at)).toBeNull()
+  })
+})
+
