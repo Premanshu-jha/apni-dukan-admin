@@ -78,6 +78,9 @@ export function EmailStep() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            // An admin confirms the email the super admin put on the Team page; only the super admin changes it
+            readOnly={current !== ''}
+            hint={current !== '' ? 'Set by the super admin on the Team page. Ask them if it is wrong.' : undefined}
           />
           {error && <Banner tone="bad">{error}</Banner>}
           <Button type="submit" busy={busy} disabled={!looksLikeEmail(email)}>
@@ -106,9 +109,11 @@ export function EmailStep() {
             <Button variant="ghost" onClick={() => send()} disabled={busy || wait > 0}>
               {wait > 0 ? `Send again in ${wait} s` : 'Send again'}
             </Button>
-            <Button variant="ghost" onClick={() => setSentTo(null)}>
-              Change email
-            </Button>
+            {current === '' && (
+              <Button variant="ghost" onClick={() => setSentTo(null)}>
+                Change email
+              </Button>
+            )}
           </div>
         </div>
       )}
