@@ -84,7 +84,8 @@ reviews walk the list against the code.
 | Team: members (Edit, Move waiting visits, Remove) and Coverage (pincode → agents) | `/team`, `/team?view=coverage` | Super admin |
 | Add or edit a member: phone, email, name, role, designation, pincodes (chips) | `/team/new`, `/team/:id` | Super admin |
 | Test mode | `/test-mode` | Super admin |
-| More: profile, Sign out | `/more` | Admins |
+| App releases: per app (Partner / Customer), the screen updates CI sent (Pull back / Put back) and the version numbers (on the Play Store, oldest allowed) | `/app-releases` | Super admin |
+| More: profile, Test mode and App releases (super admin), Sign out | `/more` | Admins |
 
 ## Flows
 
@@ -264,6 +265,23 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### Unreleased — App releases
+
+Needs the backend with V92 (app updates). Deploy the backend first: an older one answers 404 and the page says so.
+
+- **App releases** (super admin, from More): for the partner and the customer app, every screen update CI sent after
+  a merge, newest first, 20 at a time: Live / Pulled back / Not finished, the newest live one, the version, commit,
+  size and the app level it needs. **Pull back** asks first, naming the release phones move back to (over their next
+  two openings of the app); **Put back** makes it live again. Each change says who made it and when. A warning shows
+  while releases are live and no Play Store version is filled in.
+- **Who gets what:** the version on the Play Store (Google has approved it; phones on a newer version, still in
+  review, keep their own screens; empty: no Play Store phone gets screen updates yet) and the oldest allowed version
+  (older phones see only "Please update to continue"), both version codes as Play Console shows them (the hints say
+  where). Checked before saving (a whole number; the oldest allowed needs the Play Store version and can't be above
+  it); raising the oldest allowed version asks first; another super admin's save in between is never overwritten: the
+  page shows theirs.
+- Field agents and support people don't see it, and its address takes them to their start page.
 
 ### 0.20.0 — 2026-11-22
 
