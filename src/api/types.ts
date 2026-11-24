@@ -605,3 +605,41 @@ export interface SalonSubscription {
   testSalon?: boolean
 }
 
+
+/** The two Play Store apps (App releases page). */
+export type AppName = 'partner' | 'customer'
+
+/** Per app: who must update, and which app version Google has approved (AdminAppReleasesController.SettingsView). */
+export interface AppUpdateSettings {
+  /** Older app versions see "Please update to continue"; null: none have to */
+  minVersionCode: number | null
+  /** The newest version live on the Play Store; newer ones (in Google's review) get no screen updates */
+  storeVersionCode: number | null
+  /** Send back when saving (409 SETTINGS_CHANGED if another super admin saved meanwhile) */
+  version: number
+  changedAt: string | null
+  changedByName: string | null
+}
+
+export type AppReleaseStatus = 'UPLOADING' | 'LIVE' | 'PULLED'
+
+/** One screen release sent by CI after a merge (AdminAppReleasesController.ReleaseView). */
+export interface AppRelease {
+  /** The CI run's number: the same as the versionCode of that run's APK */
+  build: number
+  nativeLevel: number
+  versionName: string
+  commitSha: string
+  sizeBytes: number
+  status: AppReleaseStatus
+  createdAt: string
+  publishedAt: string | null
+  changedAt: string | null
+  changedByName: string | null
+}
+
+export interface AppReleasePage {
+  settings: AppUpdateSettings
+  releases: AppRelease[]
+  more: boolean
+}
