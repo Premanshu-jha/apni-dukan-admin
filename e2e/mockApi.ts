@@ -259,6 +259,41 @@ export class MockApi {
     this.appReleases[app].releases.sort((a, b) => (b.build as number) - (a.build as number))
   }
   /**
+   * Leads (AdminLeadsController/LeadService): districts with their areas (India Post pincodes), what a scan of each
+   * area finds (businesses in the backend's ShopView shape, without their lead: the fake joins saved leads in), the
+   * team's saved leads (version, assignment rules, 409 LEAD_CHANGED) and their history. Tests change them.
+   */
+  leads = {
+    districts: [
+      {
+        district: 'Medchal Malkajgiri',
+        state: 'Telangana',
+        areas: [
+          { pincode: '500072', places: 'Kukatpally, Vivekanandanagar Colony' },
+          { pincode: '500085', places: 'Jawaharlal Nehru Technological University, KPHB Colony' },
+          { pincode: '500090', places: 'Nizampet, Bachupally' },
+        ],
+      },
+      { district: 'Hyderabad', state: 'Telangana', areas: [{ pincode: '500073', places: 'Srinagar Colony' }] },
+    ],
+    /** Pincodes the signed-in field agent covers. */
+    mine: ['500072'],
+    onClozest: {} as Record<string, number>,
+    found: {} as Record<string, Json[]>,
+    clozestOnly: {} as Record<string, Json[]>,
+    saved: new Map<string, Json>(),
+    history: new Map<string, Json[]>(),
+    usage: { month: new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7), used: 120, cap: 50000 },
+    /** Every scan answers this (MAPBOX_OFF, MAPBOX_CAP_REACHED…), until cleared. */
+    scanError: null as null | { status: number; code: string; message: string; retryAfter?: number },
+    /** Areas whose scan answers this. */
+    scanErrorFor: new Map<string, { status: number; code: string; message: string; retryAfter?: number }>(),
+    /** Areas the map answered only in part. */
+    partial: new Set<string>(),
+    /** Requests one scan counts. */
+    requestsPerScan: 37,
+  }
+  /**
    * Analytics (AnalyticsService/AdminAnalyticsController): the answers per section, in the backend's shapes. Tests
    * change them; the fee rates are saved like the backend's (version, 409 SETTINGS_CHANGED).
    */
@@ -1454,6 +1489,184 @@ export class MockApi {
         changedAt: new Date().toISOString(), changedByName: this.user.name,
       }
       return ok(200, app.settings)
+    }
+    // ---------- leads (field agents and super admins; 404 for support) ----------
+    if (p.startsWith('/admin/leads')) {
+      if (support) return fail(404, 'NOT_FOUND', 'Not found.')
+      const L = this.leads
+      const name = (id: string | null | undefined) => (id ? ((this.team.find((m) => m.userId === id)?.name as string | undefined) ?? (id === this.user.id ? this.user.name : null)) : null)
+      const person = (id: string | null | undefined) => (id ? { id, name: name(id) } : null)
+      const district = L.districts.find((d) => d.district === url.searchParams.get('district') && d.state === url.searchParams.get('state'))
+      const placesOf = (pin: string) => L.districts.flatMap((d) => d.areas).find((a) => a.pincode === pin)?.places
+      const leadView = (l: Json) => ({
+        status: l.status, note: l.note, assignedTo: person(l.assignedTo as string | null), followUpOn: l.followUpOn ?? null,
+        whatsappOk: l.whatsappOk, whatsappOkAt: l.whatsappOkAt ?? null, whatsappOkBy: person(l.whatsappOkBy as string | null),
+        signedUpAt: l.signedUpAt ?? null, creditedTo: person(l.creditedTo as string | null), version: l.version,
+        updatedAt: l.updatedAt ?? null, updatedBy: person(l.updatedBy as string | null),
+      })
+      const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10)
+      if (p === '/admin/leads/districts' && method === 'GET') {
+        const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+        if (q.length > 60) return invalid({ q: 'not valid' })
+        if (q.length < 2) return ok(200, [])
+        const hits = L.districts.flatMap((d): Json[] => {
+          if (d.district.toLowerCase().includes(q) || d.state.toLowerCase().startsWith(q)) return [{ district: d.district, state: d.state, pincodes: d.areas.length, matched: null }]
+          const a = d.areas.find((x) => x.pincode.startsWith(q) || x.places.toLowerCase().includes(q))
+          return a ? [{ district: d.district, state: d.state, pincodes: d.areas.length, matched: /^\d+$/.test(q) ? a.pincode : `${a.places.split(', ').find((x) => x.toLowerCase().includes(q)) ?? a.places} (${a.pincode})` }] : []
+        })
+        return ok(200, hits)
+      }
+      if (p === '/admin/leads/areas' && method === 'GET') {
+        if (!district) return fail(404, 'DISTRICT_NOT_FOUND', "That district isn't in the list.")
+        return ok(200, {
+          district: district.district, state: district.state,
+          areas: district.areas.map((a) => {
+            const saved = [...L.saved.values()].filter((l) => l.pincode === a.pincode)
+            return {
+              ...a, mine: !isSuper && L.mine.includes(a.pincode), onMap: true,
+              contacted: saved.filter((l) => l.status !== 'NEW' && l.status !== 'NO_ANSWER').length, interested: saved.filter((l) => l.status === 'INTERESTED').length,
+              signedUp: saved.filter((l) => l.signedUpAt).length, onClozest: L.onClozest[a.pincode] ?? 0,
+            }
+          }),
+        })
+      }
+      const scanPath = p.match(/^\/admin\/leads\/scan\/(.+)$/)
+      if (scanPath && method === 'POST') {
+        const pin = decodeURIComponent(scanPath[1])
+        if (!placesOf(pin)) return fail(404, 'AREA_NOT_FOUND', "That pincode isn't in the list.")
+        const e = L.scanErrorFor.get(pin) ?? L.scanError
+        if (e) return ok(e.status, { code: e.code, message: e.message, details: {} }, e.retryAfter ? { 'Retry-After': String(e.retryAfter) } : {})
+        L.usage.used += L.requestsPerScan
+        const found = (L.found[pin] ?? []).map((x): Json => {
+          const saved = L.saved.get(x.mapboxId as string)
+          const clozest = x.clozest as Json | null
+          return { ...x, lead: saved ? leadView(saved) : null, clozest: clozest ? { ...clozest, shopId: isSuper ? clozest.shopId : null } : null }
+        })
+        const extra = [...L.saved.values()]
+          .filter((l) => l.pincode === pin && l.status !== 'NEW' && !found.some((x) => x.mapboxId === l.mapboxId))
+          .map((l) => ({
+            mapboxId: l.mapboxId, name: l.name ?? '', address: null, latitude: l.latitude ?? 0, longitude: l.longitude ?? 0, pincode: pin, onMapbox: false,
+            kind: 'LADIES_PARLOUR', chain: false, score: 60, priority: 'MEDIUM', phone: l.phone ?? null, website: null, hours: null, lead: leadView(l), clozest: null,
+          }))
+        return ok(200, {
+          pincode: pin, places: placesOf(pin), district: L.districts.find((d) => d.areas.some((a) => a.pincode === pin))!.district, state: 'Telangana',
+          shops: [...found, ...extra], clozestOnly: (L.clozestOnly[pin] ?? []).map((s) => ({ ...s, shopId: isSuper ? s.shopId : null })),
+          requests: L.requestsPerScan, partial: L.partial.has(pin), capReached: false, usage: { ...L.usage },
+        })
+      }
+      if (p === '/admin/leads/usage' && method === 'GET') return ok(200, { ...L.usage })
+      if (p === '/admin/leads/due' && method === 'GET') {
+        const everyone = url.searchParams.get('everyone') === 'true'
+        if (everyone && !isSuper) return superOnly()
+        const due = [...L.saved.values()]
+          .filter((l) => l.followUpOn && (l.followUpOn as string) <= today && !l.signedUpAt && (everyone || l.assignedTo === this.user.id))
+          .sort((a, b) => (a.followUpOn as string).localeCompare(b.followUpOn as string))
+          .map((l) => ({
+            mapboxId: l.mapboxId, name: l.name ?? null, phone: l.phone ?? null, latitude: l.latitude ?? null, longitude: l.longitude ?? null, pincode: l.pincode,
+            places: placesOf(l.pincode as string) ?? l.pincode, status: l.status, followUpOn: l.followUpOn, note: l.note, assignedTo: person(l.assignedTo as string | null),
+            whatsappOk: l.whatsappOk, version: l.version,
+          }))
+        return ok(200, due)
+      }
+      if (p === '/admin/leads/mine' && method === 'GET') {
+        const everyone = url.searchParams.get('everyone') === 'true'
+        if (everyone && !isSuper) return superOnly()
+        const mine = [...L.saved.values()]
+          .filter((l) => l.status !== 'NEW' && !l.signedUpAt && (everyone || l.assignedTo === this.user.id))
+          .sort((a, b) => (b.updatedAt as string).localeCompare(a.updatedAt as string))
+          .map((l) => ({
+            mapboxId: l.mapboxId, name: l.name ?? null, phone: l.phone ?? null, latitude: l.latitude ?? null, longitude: l.longitude ?? null, pincode: l.pincode,
+            places: placesOf(l.pincode as string) ?? l.pincode, status: l.status, followUpOn: l.followUpOn ?? null, note: l.note, assignedTo: person(l.assignedTo as string | null),
+            whatsappOk: l.whatsappOk, version: l.version,
+          }))
+        return ok(200, mine)
+      }
+      if (p === '/admin/leads/funnel' && method === 'GET') {
+        if (!isSuper) return superOnly()
+        if (!district) return fail(404, 'DISTRICT_NOT_FOUND', "That district isn't in the list.")
+        const pins = new Set(district.areas.map((a) => a.pincode))
+        const rows = [...L.saved.values()].filter((l) => pins.has(l.pincode as string))
+        const areas = [...new Set(rows.map((l) => l.pincode as string))].sort().map((pin) => {
+          const r = rows.filter((l) => l.pincode === pin)
+          return { pincode: pin, places: placesOf(pin), touched: r.length, contacted: r.filter((l) => l.status !== 'NEW' && l.status !== 'NO_ANSWER').length, interested: r.filter((l) => l.status === 'INTERESTED').length, notInterested: r.filter((l) => l.status === 'NOT_INTERESTED').length, signedUp: r.filter((l) => l.signedUpAt).length }
+        })
+        const ids = [...new Set(rows.map((l) => l.assignedTo as string | null).filter((x): x is string => !!x))]
+        const people = ids.map((id) => {
+          const r = rows.filter((l) => l.assignedTo === id)
+          return { person: person(id), assigned: r.length, contacted: r.filter((l) => l.status !== 'NEW' && l.status !== 'NO_ANSWER').length, interested: r.filter((l) => l.status === 'INTERESTED').length, signedUp: rows.filter((l) => l.creditedTo === id && l.signedUpAt).length }
+        })
+        return ok(200, { district: district.district, state: district.state, areas, people })
+      }
+      const historyPath = p.match(/^\/admin\/leads\/(.+)\/history$/)
+      if (historyPath && method === 'GET') return ok(200, L.history.get(decodeURIComponent(historyPath[1])) ?? [])
+      const leadPath = p.match(/^\/admin\/leads\/([^/]+)$/)
+      if (leadPath && method === 'PUT') {
+        // As LeadService.save, check by check in the same order
+        const id = decodeURIComponent(leadPath[1])
+        const b = body as Json
+        const status = (b.status as string | null) ?? 'NEW'
+        if (!['NEW', 'NO_ANSWER', 'CALLED', 'VISITED', 'INTERESTED', 'NOT_INTERESTED'].includes(status)) return invalid({ status: 'not valid' })
+        const note = ((b.note as string | null) ?? '').trim()
+        if (note.length > 500) return invalid({ note: 'not valid' })
+        if (!placesOf(b.pincode as string)) return invalid({ pincode: 'not valid' })
+        const tried = status !== 'NEW'
+        const bizName = ((b.name as string | null) ?? '').trim() || null
+        if (tried && (!bizName || bizName.length > 150)) return invalid({ name: 'not valid' })
+        const phone = (b.phone as string | null) || null
+        if (phone && !/^[6-9]\d{9}$/.test(phone)) return invalid({ phone: 'not valid' })
+        const lat = (b.latitude as number | null) ?? null
+        const lng = (b.longitude as number | null) ?? null
+        if ((lat === null) !== (lng === null) || (lat !== null && (lat < 6 || lat > 37.6 || lng! < 68 || lng! > 97.5))) return invalid({ latitude: 'not valid' })
+        const spoken = ['CALLED', 'VISITED', 'INTERESTED', 'NOT_INTERESTED'].includes(status)
+        const wantsOk = !!b.whatsappOk
+        if (wantsOk && (!spoken || !phone)) return invalid({ whatsappOk: 'not valid' })
+        const before = L.saved.get(id)
+        if (before ? b.version !== before.version : b.version != null) {
+          return fail(409, 'LEAD_CHANGED', 'Someone else changed this lead just now. Check it and save again.', before ? { lead: leadView(before) } : {})
+        }
+        const f = (b.followUpOn as string | null) ?? null
+        if (f && f !== (before?.followUpOn ?? null) && (f < today || f > `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`)) return invalid({ followUpOn: 'not valid' })
+        const current = (before?.assignedTo as string | null) ?? null
+        const assignee = (b.assignedTo as string | null) ?? null
+        const onTeam = (uid: string) => uid === this.user.id || this.team.some((m) => m.userId === uid && (m.adminRole === 'SUPER_ADMIN' || m.designation === 'FIELD_AGENT'))
+        if (assignee && assignee !== current && !onTeam(assignee)) return invalid({ assignedTo: 'not valid' })
+        if (before && before.status !== 'NEW' && !tried) return invalid({ status: 'not valid' })
+        if (before?.signedUpAt && before.status !== status) return fail(409, 'LEAD_SIGNED_UP', 'This business has signed up on Clozest: its status stays as it was.')
+        if (!isSuper && assignee !== current) {
+          const free = current === null || !onTeam(current)
+          if (!(free && assignee === this.user.id) && !(current === this.user.id && assignee === null)) {
+            return fail(403, 'ASSIGNED_TO_SOMEONE_ELSE', 'Only a super admin can give this lead to someone else.')
+          }
+        }
+        const now = new Date().toISOString()
+        // A new (or no) phone ends the old consent, as the backend
+        const consent = wantsOk && !(before?.whatsappOk && before.phone !== phone)
+        const keep = !!before?.whatsappOk && consent
+        const after: Json = {
+          mapboxId: id, pincode: b.pincode, status, note, assignedTo: assignee, followUpOn: f,
+          name: tried ? bizName : null, phone: tried ? phone : null, latitude: tried ? lat : null, longitude: tried ? lng : null,
+          contactedAt: tried ? (before?.contactedAt ?? now) : null,
+          whatsappOk: consent, whatsappOkAt: consent ? (keep ? before!.whatsappOkAt : now) : null, whatsappOkBy: consent ? (keep ? before!.whatsappOkBy : this.user.id) : null,
+          signedUpAt: before?.signedUpAt ?? null, creditedTo: before?.creditedTo ?? null,
+          version: before ? (before.version as number) : 0, updatedAt: now, updatedBy: this.user.id,
+        }
+        const fields = ['status', 'note', 'assignedTo', 'followUpOn', 'name', 'phone', 'latitude', 'longitude', 'whatsappOk', 'whatsappOkAt']
+        // The same work saved again: the lead as it is, no new version or history
+        if (before && fields.every((k) => (before[k] ?? null) === (after[k] ?? null))) return ok(200, leadView(before))
+        if (before) after.version = (before.version as number) + 1
+        L.saved.set(id, after)
+        const events = L.history.get(id) ?? []
+        const ev = (field: string, oldValue: unknown, newValue: unknown) => events.unshift({ at: now, by: person(this.user.id), field, oldValue: oldValue ?? null, newValue: newValue ?? null })
+        if (!before || before.status !== after.status) ev('STATUS', before?.status, after.status)
+        if ((before?.note ?? '') !== note) ev('NOTE', before?.note, note)
+        if ((before?.assignedTo ?? null) !== assignee) ev('ASSIGNED', name(current), name(assignee))
+        if ((before?.followUpOn ?? null) !== f) ev('FOLLOW_UP', before?.followUpOn, f)
+        if (!!before?.whatsappOk !== consent) ev('WHATSAPP', String(!!before?.whatsappOk), String(consent))
+        if (before?.phone && before.phone !== after.phone) ev('PHONE', before.phone, after.phone)
+        L.history.set(id, events)
+        return ok(200, leadView(after))
+      }
+      return fail(404, 'NOT_FOUND', 'Not found.')
     }
     // ---------- analytics (super admins only: 403 SUPER_ADMIN_ONLY for the rest of the team) ----------
     if (p.startsWith('/admin/analytics/')) {
