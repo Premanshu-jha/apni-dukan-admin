@@ -774,3 +774,169 @@ export interface VersionsView {
   today: string
   days: { day: string; app: AppName; versionCode: number; store: boolean; phones: number }[]
 }
+
+// ---------- leads (salons found on the map) ----------
+
+export type LeadStatus = 'NEW' | 'NO_ANSWER' | 'CALLED' | 'VISITED' | 'INTERESTED' | 'NOT_INTERESTED'
+export type LeadKind =
+  | 'LADIES_PARLOUR'
+  | 'UNISEX_SALON'
+  | 'MENS_SALON'
+  | 'BRIDAL_MAKEUP'
+  | 'MEHENDI'
+  | 'SPA_MASSAGE'
+  | 'NAIL_LASH'
+  | 'SKIN_HAIR_CLINIC'
+  | 'TATTOO'
+  | 'COSMETICS_SHOP'
+  | 'OTHER'
+export type LeadPriority = 'HIGH' | 'MEDIUM' | 'LOW'
+
+export interface LeadPerson {
+  id: string
+  /** Null when they have no name yet, or left the team. */
+  name: string | null
+}
+
+export interface LeadDistrict {
+  district: string
+  state: string
+  pincodes: number
+  /** What matched when it wasn't the district's name, e.g. "Kukatpally (500072)". */
+  matched: string | null
+}
+
+export interface LeadArea {
+  pincode: string
+  places: string
+  /** The signed-in field agent covers this pincode. */
+  mine: boolean
+  /** India Post has a point for it (one without may still be on Mapbox). */
+  onMap: boolean
+  contacted: number
+  interested: number
+  signedUp: number
+  onClozest: number
+}
+
+export interface LeadAreas {
+  district: string
+  state: string
+  areas: LeadArea[]
+}
+
+export interface Lead {
+  status: LeadStatus
+  note: string
+  assignedTo: LeadPerson | null
+  followUpOn: string | null
+  whatsappOk: boolean
+  whatsappOkAt: string | null
+  whatsappOkBy: LeadPerson | null
+  signedUpAt: string | null
+  creditedTo: LeadPerson | null
+  version: number
+  updatedAt: string | null
+  updatedBy: LeadPerson | null
+}
+
+/** A Clozest salon; shopId only for super admins. */
+export interface LeadClozest {
+  shopId: string | null
+  name: string
+  status: ShopStatus
+}
+
+export interface LeadShop {
+  mapboxId: string
+  name: string
+  address: string | null
+  latitude: number
+  longitude: number
+  pincode: string
+  /** False: a lead the team contacted that the map didn't list this time (its saved details). */
+  onMapbox: boolean
+  kind: LeadKind
+  chain: boolean
+  score: number
+  priority: LeadPriority
+  /** 10 digits for a mobile number, else as the map has it. */
+  phone: string | null
+  website: string | null
+  hours: { days: number; opens: string; closes: string; late: boolean } | null
+  lead: Lead | null
+  clozest: LeadClozest | null
+}
+
+export interface LeadSalon {
+  shopId: string | null
+  name: string
+  status: ShopStatus
+  latitude: number
+  longitude: number
+}
+
+export interface LeadUsage {
+  month: string
+  used: number
+  cap: number
+}
+
+export interface LeadScan {
+  pincode: string
+  places: string
+  district: string
+  state: string
+  shops: LeadShop[]
+  clozestOnly: LeadSalon[]
+  requests: number
+  partial: boolean
+  capReached: boolean
+  usage: LeadUsage
+}
+
+export interface LeadIn {
+  status: LeadStatus
+  note: string
+  assignedTo: string | null
+  followUpOn: string | null
+  whatsappOk: boolean
+  pincode: string
+  name: string | null
+  phone: string | null
+  latitude: number | null
+  longitude: number | null
+  /** The version shown; null for a lead not saved yet. */
+  version: number | null
+}
+
+export interface LeadEvent {
+  at: string
+  by: LeadPerson | null
+  field: 'STATUS' | 'NOTE' | 'ASSIGNED' | 'FOLLOW_UP' | 'WHATSAPP' | 'PHONE' | 'SIGNED_UP'
+  oldValue: string | null
+  newValue: string | null
+}
+
+export interface LeadDue {
+  mapboxId: string
+  name: string | null
+  phone: string | null
+  latitude: number | null
+  longitude: number | null
+  pincode: string
+  places: string
+  status: LeadStatus
+  followUpOn: string | null
+  note: string
+  assignedTo: LeadPerson | null
+  whatsappOk: boolean
+  version: number
+}
+
+export interface LeadFunnel {
+  district: string
+  state: string
+  areas: { pincode: string; places: string; touched: number; contacted: number; interested: number; notInterested: number; signedUp: number }[]
+  people: { person: LeadPerson; assigned: number; contacted: number; interested: number; signedUp: number }[]
+}
