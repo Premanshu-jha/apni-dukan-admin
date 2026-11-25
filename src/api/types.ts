@@ -636,10 +636,141 @@ export interface AppRelease {
   publishedAt: string | null
   changedAt: string | null
   changedByName: string | null
+  /** Open phones show "A fix for the app is ready" with Restart once they have it */
+  urgent: boolean
+  /** What it fixes (only when urgent) */
+  urgentNote: string | null
+  urgentAt: string | null
+  /** The super admin who marked it; null when CI did (a PR titled "[urgent] …") */
+  urgentByName: string | null
 }
 
 export interface AppReleasePage {
   settings: AppUpdateSettings
   releases: AppRelease[]
   more: boolean
+}
+
+// ---- Analytics (super admins only) -----------------------------------------------------------------------------
+
+export type PaymentSource = 'WEBSITE' | 'APP_RAZORPAY' | 'GOOGLE_PLAY'
+
+/** One month's money (for one source, or all: source null), in paise. Google's fee is an estimate. */
+export interface Money {
+  source: PaymentSource | null
+  payments: number
+  salons: number
+  grossPaise: number
+  refundsPaise: number
+  refundCount: number
+  razorpayFeePaise: number
+  googleFeeEstimatePaise: number
+  netPaise: number
+}
+
+export interface MoneyMonth {
+  /** yyyy-MM, India's month */
+  month: string
+  total: Money
+  bySource: Money[]
+}
+
+export interface FeeSettings {
+  /** basis points: 1500 = 15% */
+  playFeeBps: number
+  userChoiceFeeBps: number
+  version: number
+  changedAt: string | null
+  changedByName: string | null
+}
+
+export interface MoneyView {
+  months: MoneyMonth[]
+  recurring: { salons: number; monthlyPaise: number; bySource: { source: PaymentSource; salons: number; monthlyPaise: number }[] }
+  fees: FeeSettings
+}
+
+export interface AnalyticsSalonLine {
+  shopId: string
+  name: string
+  area: string | null
+  pincode: string | null
+  /** when its free or paid time ends */
+  ends: string
+  state: 'TRIAL' | 'PAYING' | 'GRACE' | 'LAPSED'
+  source: PaymentSource
+}
+
+export interface SubscriptionsView {
+  trial: number
+  trialWithAutoPay: number
+  paying: number
+  payingBySource: { source: PaymentSource; salons: number; renewing: number }[]
+  grace: number
+  lapsed: number
+  paymentProblems: number
+  months: { month: string; firstPayments: number; stopped: number }[]
+  trialsEnding: AnalyticsSalonLine[]
+  problems: AnalyticsSalonLine[]
+}
+
+/** A daily total: day (yyyy-MM-dd), what it is split by (a role, a pincode, an hour, "CUSTOMER:APP"…), the count. */
+export interface Point {
+  day: string
+  dim: string
+  value: number
+}
+
+export interface PeopleView {
+  from: string
+  to: string
+  accounts: Point[]
+  salons: Point[]
+  salonsEverApproved: number
+  signups: Point[]
+  salonsRegistered: Point[]
+  salonsApproved: Point[]
+  approvalHoursMedian: number | null
+  activeDay: Point[]
+  activeToday: Point[]
+  activeWeek: Point[]
+  activeMonth: Point[]
+}
+
+export interface BookingsView {
+  from: string
+  to: string
+  pincode: string | null
+  created: Point[]
+  visits: Point[]
+  visitsByStatus: Point[]
+  busiestHours: Point[]
+  topAreas: Point[]
+}
+
+export interface SalonUse {
+  shopId: string
+  name: string
+  area: string | null
+  pincode: string | null
+  status: string
+  lastActiveDay: string | null
+  bookings30d: number
+  completed30d: number
+  walkIns30d: number
+  noShows30d: number
+  services: number
+  staff: number
+  pictures: number
+}
+
+export interface SalonsView {
+  salons: SalonUse[]
+  more: boolean
+  quietSalons: number
+}
+
+export interface VersionsView {
+  today: string
+  days: { day: string; app: AppName; versionCode: number; store: boolean; phones: number }[]
 }
