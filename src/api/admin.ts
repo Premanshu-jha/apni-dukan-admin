@@ -3,6 +3,10 @@ import { api } from './client'
 import { ApiError } from './errors'
 import type {
   AddressDeclineIn,
+  AppName,
+  AppRelease,
+  AppReleasePage,
+  AppUpdateSettings,
   AddressIn,
   AdminMe,
   AdminShop,
@@ -168,6 +172,12 @@ export const adminApi = {
     write<TeamMember>('PUT', `${A}/team/${encodeURIComponent(userId)}`, { version, ...member }),
   removeMember: (userId: string) => write<void>('DELETE', `${A}/team/${encodeURIComponent(userId)}`),
 
+  appReleases: (app: AppName, before?: number) =>
+    api<AppReleasePage>('GET', `${A}/app-releases/${app}${before ? `?before=${before}` : ''}`),
+  pullBackRelease: (app: AppName, build: number) => write<AppRelease>('POST', `${A}/app-releases/${app}/${build}/pull-back`),
+  restoreRelease: (app: AppName, build: number) => write<AppRelease>('POST', `${A}/app-releases/${app}/${build}/restore`),
+  saveAppUpdateSettings: (app: AppName, body: { minVersionCode: number | null; storeVersionCode: number | null; version: number }) =>
+    write<AppUpdateSettings>('PUT', `${A}/app-releases/${app}/settings`, body),
   testMode: () => api<TestModeState>('GET', `${A}/test-mode`),
   testModeOn: (hours: number) => write<TestModeState>('PUT', `${A}/test-mode`, { hours }),
   testModeOff: () => write<TestModeState>('DELETE', `${A}/test-mode`),
@@ -198,6 +208,7 @@ export const keys = {
   team: ['admin', 'team'] as const,
   coverage: ['admin', 'team', 'coverage'] as const,
   testMode: ['admin', 'test-mode'] as const,
+  appReleases: (app: AppName) => ['admin', 'app-releases', app] as const,
   tickets: ['admin', 'tickets'] as const,
   ticketList: (view: TicketView, assignee: string | null) => ['admin', 'tickets', 'list', view, assignee] as const,
   ticketCounts: ['admin', 'tickets', 'counts'] as const,
@@ -291,6 +302,16 @@ export function useTeam(enabled = true) {
 
 export function useCoverage() {
   return useQuery({ queryKey: keys.coverage, queryFn: adminApi.coverage })
+}
+
+/** One app's settings and its releases, newest first, 20 a page ("Show older" asks for the next). */
+export function useAppReleases(app: AppName) {
+  return useInfiniteQuery({
+    queryKey: keys.appReleases(app),
+    queryFn: ({ pageParam }) => adminApi.appReleases(app, pageParam),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (last) => (last.more ? last.releases[last.releases.length - 1]?.build : undefined),
+  })
 }
 
 export function useTestMode() {

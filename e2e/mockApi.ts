@@ -240,6 +240,21 @@ export class MockApi {
   /** GET /admin/shops/licence-ai-usage (LicenceAiWatch.usage): tests set what the AI has cost and any refusal. */
   licenceAi: Json = { periodStart: '2026-11-04', periodEnd: '2026-12-03', reads: 120, spentUsd: 1.2, budgetUsd: 100, problem: null, problemSince: null, keySet: true, alertRecipients: 1 }
   testMode: { on: boolean; until: string | null; turnedOnByName: string | null } = { on: false, until: null, turnedOnByName: null }
+  /** App releases (AppReleases/AdminAppReleasesController): per app, the settings and the releases newest first. */
+  appReleases: Record<string, { settings: Json; releases: Json[] }> = {
+    partner: { settings: { minVersionCode: null, storeVersionCode: null, version: 0, changedAt: null, changedByName: null }, releases: [] },
+    customer: { settings: { minVersionCode: null, storeVersionCode: null, version: 0, changedAt: null, changedByName: null }, releases: [] },
+  }
+
+  /** Adds a release as CI would (newest first), LIVE unless said otherwise. */
+  addRelease(app: 'partner' | 'customer', build: number, status: 'UPLOADING' | 'LIVE' | 'PULLED' = 'LIVE') {
+    const at = new Date(Date.now() - (1000 - build) * 60_000).toISOString()
+    this.appReleases[app].releases.push({
+      build, nativeLevel: 1, versionName: '0.30.0', commitSha: 'a1b2c3d4e5f6', sizeBytes: 1_167_104, status,
+      createdAt: at, publishedAt: status === 'UPLOADING' ? null : at, changedAt: null, changedByName: null,
+    })
+    this.appReleases[app].releases.sort((a, b) => (b.build as number) - (a.build as number))
+  }
   testPhones: Json[] = []
   testEmails: Json[] = []
   /** Answer test-mode state without `emails`, like a backend from before the list. */
@@ -1352,6 +1367,49 @@ export class MockApi {
       m.adminRole = 'NONE'
       this.reassignFrom(m)
       return ok(204)
+    }
+    const releasesOf = p.match(/^\/admin\/app-releases\/([^/]+)$/)
+    if (releasesOf && method === 'GET') {
+      // As the backend: the app is looked up first, then the role
+      const app = this.appReleases[releasesOf[1]]
+      if (!app) return fail(404, 'NOT_FOUND', 'App not found')
+      if (!isSuper) return superOnly()
+      const before = Number(url.searchParams.get('before') ?? Number.MAX_SAFE_INTEGER)
+      const rows = app.releases.filter((r) => (r.build as number) < before)
+      return ok(200, { settings: app.settings, releases: rows.slice(0, 20), more: rows.length > 20 })
+    }
+    const releaseChange = p.match(/^\/admin\/app-releases\/([^/]+)\/(\d+)\/(pull-back|restore)$/)
+    if (releaseChange && method === 'POST') {
+      if (!this.appReleases[releaseChange[1]]) return fail(404, 'NOT_FOUND', 'App not found')
+      if (!isSuper) return superOnly()
+      const r = this.appReleases[releaseChange[1]].releases.find((x) => x.build === Number(releaseChange[2]))
+      if (!r) return fail(404, 'NOT_FOUND', 'Release not found')
+      const pull = releaseChange[3] === 'pull-back'
+      if (pull && r.status !== 'LIVE') return fail(409, 'RELEASE_NOT_LIVE', "This build isn't live (any more).")
+      if (!pull && r.status !== 'PULLED') return fail(409, 'RELEASE_NOT_PULLED', "This build isn't pulled back.")
+      Object.assign(r, { status: pull ? 'PULLED' : 'LIVE', changedAt: new Date().toISOString(), changedByName: this.user.name })
+      return ok(200, r)
+    }
+    const releaseSettings = p.match(/^\/admin\/app-releases\/([^/]+)\/settings$/)
+    if (releaseSettings && method === 'PUT') {
+      const app = this.appReleases[releaseSettings[1]]
+      if (!app) return fail(404, 'NOT_FOUND', 'App not found')
+      if (!isSuper) return superOnly()
+      // As the backend's @Min(1) @Max(2_100_000_000) on each, naming the field that is wrong
+      const n = (v: unknown) => v === null || (Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 2_100_000_000)
+      const wrong: Json = {}
+      if (!n(body.minVersionCode)) wrong.minVersionCode = 'must be between 1 and 2100000000'
+      if (!n(body.storeVersionCode)) wrong.storeVersionCode = 'must be between 1 and 2100000000'
+      if (Object.keys(wrong).length) return invalid(wrong)
+      if (body.minVersionCode !== null && (body.storeVersionCode === null || body.minVersionCode > body.storeVersionCode)) {
+        return fail(400, 'MIN_ABOVE_STORE', "The oldest allowed version can't be newer than the version on the Play Store.")
+      }
+      if (body.version !== app.settings.version) return fail(409, 'SETTINGS_CHANGED', 'Someone else changed these settings. Look again.')
+      app.settings = {
+        minVersionCode: body.minVersionCode, storeVersionCode: body.storeVersionCode, version: (app.settings.version as number) + 1,
+        changedAt: new Date().toISOString(), changedByName: this.user.name,
+      }
+      return ok(200, app.settings)
     }
     if (p === '/admin/test-mode') {
       if (!isSuper) return superOnly()

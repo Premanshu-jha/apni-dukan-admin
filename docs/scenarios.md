@@ -459,3 +459,27 @@ Backend tests here are `AdminCodeIntegrationTest` (written `ACI.<method>`).
 | 255 | Another tab of the same browser | Same sign-in (session): it shares the step | The other tab follows the saved session and refreshes into admin access; opened at the same time, it doesn't send a second code (row 257) | ACI.theCodeIsForTheDevice… (per sign-in) | — | OK-untested |
 | 256 | Release order | An older backend never sends `adminCodeNeeded` | Deploy this app first, then the backend; nothing changes until the backend is live | — | — | OK-untested (a release step) |
 
+
+## App releases (backend V92)
+
+Backend tests here are `AppReleasesIntegrationTest` (written `ARI.<method>`); e2e tests are `e2e/releases.spec.ts`.
+
+| # | Scenario | What the API answers | What the screen does | Backend test | App test | Verdict |
+|---|---|---|---|---|---|---|
+| 330 | A super admin opens More | — | "App releases" link (with Test mode); the page opens on the partner app | — | e2e:releases "a super admin finds App releases from More…" | OK-tested |
+| 331 | The list | `GET /admin/app-releases/partner` → settings, 20 releases newest first, `more` | Each release: Live / Pulled back / Not finished, "Newest live" on the newest live release, "needs app level N" explained, version, commit, size, when | ARI.theListPagesNewestFirst | e2e:releases same | OK-tested |
+| 332 | More than 20 releases | `?before=<last build>` | "Show older releases" adds the next 20 | ARI.theListPagesNewestFirst | — (useInfiniteQuery, like the ticket list) | OK-untested |
+| 333 | Pull back | `POST …/245/pull-back` → `PULLED` | Asks first: "Phones on it move back to build 240 over their next two openings…" (or "…the newest live release before it…" when none is loaded); Keep it live closes; then "Pulled back", the one before gets "Newest live" | ARI.aPulledReleaseSendsPhonesBack… | e2e:releases same | OK-tested |
+| 334 | Another super admin pulled it back first | 409 `RELEASE_NOT_LIVE` | The list is read again, the sheet closes (it is no longer live) and the card says why | ARI same | e2e:releases "a release another super admin pulled back first…" | OK-tested |
+| 335 | Put back | `POST …/restore` → `LIVE` | "Live", "Phones get this one" again | ARI same | e2e:releases same | OK-tested |
+| 336 | The customer app | `GET /admin/app-releases/customer` | Its own list and numbers; "No releases yet" with what's needed | ARI | e2e:releases same | OK-tested |
+| 337 | Version numbers typed wrong (letters, the oldest allowed above the Play Store's, oldest allowed with no Play Store version) | 400 `MIN_ABOVE_STORE` / `VALIDATION_FAILED` if sent | Said under the field before sending ("Fill in the Play Store version first", "Can't be newer…"); Save stays off; the hints say where the version code is in Play Console | ARI.settingsAreChecked… | e2e:releases "the version numbers are checked…" | OK-tested |
+| 338 | Save | `PUT …/settings` → the new numbers, `version` + 1 | "Saved. Phones follow within a minute of opening the app."; "Last changed by …" | ARI same | e2e:releases same | OK-tested |
+| 339 | Another super admin saved meanwhile | 409 `SETTINGS_CHANGED` | Says so; the page shows their numbers to check and save again | ARI same | e2e:releases same | OK-tested |
+| 340 | A field agent or support person | 403 `SUPER_ADMIN_ONLY` | No link in More; `/app-releases` goes to their start page; no call made | ARI.onlyASuperAdminSees… | e2e:releases "a field agent has no App releases" | OK-tested |
+| 341 | A super admin made an ordinary admin while the page is open | 403 `SUPER_ADMIN_ONLY` on a change | `/admin/me` is read again and the guard moves them out (as for Team) | ARI.onlyASuperAdminSees… (the 403) | (the shared `write` rule; e2e:super tests it on Team) | OK-untested |
+| 342 | Two Pull back taps | One request (`sending` guard) | Busy button | — | (same guard as Test mode) | OK-untested |
+| 343 | Raising the oldest allowed version | — | Asked first: "Block versions older than 120?", with when it is safe; Don't change it sends nothing | — | e2e:releases "the version numbers are checked…" | OK-tested |
+| 344 | Releases live, no Play Store version filled in | — | A warning: Play Store phones get none of these yet | ARI (the hold) | e2e:releases "a warning when releases are live…" | OK-tested |
+| 345 | The list can't be read again (offline) or Show older fails | network error | A banner: may be out of date, with Try again | — | (by reading) | OK-untested |
+| 346 | A release CI didn't finish | `UPLOADING` | "Not finished: … Phones never get it, nothing to do; the next merge sends a new one." | ARI | e2e:releases | OK-tested |
