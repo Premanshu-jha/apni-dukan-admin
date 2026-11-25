@@ -1,10 +1,10 @@
 import { atDashboard, expect, istTime, signedIn, test } from './helpers'
 import { MockApi } from './mockApi'
 
-test('a field agent has no Support, Team or Test mode, and their addresses go to the dashboard', async ({ page, context, api }) => {
+test('a field agent has Leads but no Support, Team or Test mode, and their addresses go to the dashboard', async ({ page, context, api }) => {
   await atDashboard(page, context, api, 'ADMIN')
   const nav = page.getByRole('navigation', { name: 'Main' })
-  await expect(nav.getByRole('link')).toHaveText(['Businesses', 'More'].map((t) => new RegExp(t)))
+  await expect(nav.getByRole('link')).toHaveText(['Businesses', 'Leads', 'More'].map((t) => new RegExp(t)))
   for (const path of ['/team', '/team/new', '/team/u5', '/test-mode', '/support', '/tickets', '/tickets/t1001']) {
     await page.goto(path)
     await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible()

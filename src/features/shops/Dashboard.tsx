@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from 'react-router'
 import { useDashboard, useLicenceAiUsage, useLicencesToFollowUp } from '../../api/admin'
+import { useDue } from '../../api/leads'
 import { explain } from '../../api/errors'
 import type { ShopType } from '../../api/types'
 import { Tabs } from '../../components/Tabs'
@@ -26,6 +27,7 @@ export function Dashboard() {
   return (
     <Page title="Businesses">
       {!superAdmin && <p className="text-sm text-muted">Only the businesses assigned to you (by the pincodes you cover).</p>}
+      <LeadsDue />
       <Tabs
         label="Business type"
         value={type}
@@ -121,5 +123,23 @@ export function Dashboard() {
         </>
       )}
     </Page>
+  )
+}
+
+/** Leads follow-ups due today or earlier (the signed-in person's), one tap away; and the way to find new salons. */
+function LeadsDue() {
+  const due = useDue(false)
+  const n = due.data?.length ?? 0
+  return (
+    <Link
+      to={n ? '/leads?view=due' : '/leads'}
+      className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 hover:bg-raised"
+    >
+      <span className="min-w-0">
+        <span className="font-semibold">{n ? `Leads: ${n} follow-up${n === 1 ? '' : 's'} due` : 'Leads: find salons on the map'}</span>
+        <span className="block text-sm text-muted">{n ? 'Salons to call back today or earlier' : 'Search an area for salons and parlours to sign up'}</span>
+      </span>
+      <span aria-hidden>›</span>
+    </Link>
   )
 }

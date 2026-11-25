@@ -522,3 +522,40 @@ unit tests `src/features/analytics/analytics.test.ts` (written `unit`).
 | 388 | A pincode starting with 0 | (not sent) | "Indian pincodes don't start with 0" | — | e2e:analytics same | OK-tested |
 | 389 | Salons in a pincode with none approved | — | "None in 500087" with "See all areas" | — | (by reading) | OK-untested |
 | 390 | App versions after an urgent fix | — | Says it counts the installed app (APK) version; screen updates aren't counted there (see App releases) | — | (by reading) | OK-untested |
+
+## Leads (backend V96–V98)
+
+The backend's own rows are in its `docs/scenarios.md` §12. These are the screen's.
+
+| # | Scenario | What the API answers | What the screen shows | Tests | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| L1 | A field agent looks for Leads | — | A Leads tab; a home card "Leads: find salons on the map" (or "n follow-ups due") | e2e:leads "a field agent finds a district…"; e2e:super "a field agent has Leads…" | OK-tested |
+| L2 | A super admin looks for Leads | — | More › Leads (five tabs already fit a phone); the home card | e2e:leads "a super admin opens Leads…" | OK-tested |
+| L3 | Support opens `/leads` | 404 | Sent to Tickets | e2e:leads "support staff never see Leads" | OK-tested |
+| L4 | Typing a city, an area name or a pincode | districts, with what matched | Dropdown with "Has Kukatpally (500072) · n areas"; Enter picks the first; Escape clears | e2e:leads first | OK-tested |
+| L5 | Nothing matches | [] | "No city, district, area or pincode matches…" | (by reading) | OK-untested |
+| L6 | A big city spans districts | — | Several districts as chips; a hint for Greater Hyderabad | e2e:leads first | OK-tested |
+| L7 | Area search with chips; clearing it | — | Only the chosen areas; "Clear search (show all areas)" brings all back; Backspace removes the last chip | e2e:leads first; unit:logic "area search" | OK-tested |
+| L8 | Searching several areas | each scanned, two at a time | Progress "Searched n of m", Stop; each area "n found" | e2e:leads first | OK-tested |
+| L9 | No key, cap reached, too many this hour | 503 MAPBOX_OFF / 429 MAPBOX_CAP_REACHED / 429 TOO_MANY_REQUESTS | The search stops; says who fixes it | e2e:leads "a search that can't run…" | OK-tested |
+| L10 | The server is busy | 503 SCAN_BUSY, Retry-After | The area waits and is tried again | e2e:leads same | OK-tested |
+| L11 | An area the map can't place | 404 AREA_NOT_ON_MAP | That area is marked; the others go on | e2e:leads same | OK-tested |
+| L12 | The map answered only in part | `partial` | "The map didn't answer fully for … search again later" | (by reading) | OK-untested |
+| L13 | On Clozest only, a status, not on Clozest | — | The matched salons and the unmatched ones; by status; the rest | e2e:leads first; unit:logic "filterRows" | OK-tested |
+| L14 | Two overlapping areas list one business | — | Listed once | unit:logic "rowsOf" | OK-tested |
+| L15 | Working a lead: status, note, call-back, me, WhatsApp | PUT with the map's details and the version | Saved, shown on the card, due today in Follow-ups and on the home card | e2e:leads first | OK-tested |
+| L16 | WhatsApp before contacting, or with no mobile | — | The switch is off and says why | e2e:leads first; unit:logic "leadIn" | OK-tested |
+| L17 | Someone saved the lead meanwhile | 409 LEAD_CHANGED with the lead | Their status shown; your typing kept; Save again works | e2e:leads "a lead someone else saved…" | OK-tested |
+| L18 | A field agent and someone else's lead | 403 if they try | "(only a super admin can give it to someone else)"; status and note still change | e2e:leads "a lead given to someone else…" | OK-tested |
+| L19 | A contacted lead the map no longer lists | `onMapbox` false | "saved by the team (not on the map now)" | e2e:leads super admin | OK-tested |
+| L20 | Copying the list for a sheet | — | Tab-separated rows, no tabs or line breaks inside cells | unit:logic "copyText" | OK-tested |
+| L21 | INCONVENIENCE: results gone after a reload | — | The map's terms don't allow storing; the team's work stays; districts are remembered | — | N/A-v1 |
+| L22 | Many at once: a district with hundreds of areas, thousands of businesses | — | Areas list scrolls in place; the list shows 50 at a time; searches two at a time | (by reading) | OK-untested |
+| L23 | No answer; a tried lead reopened | `NO_ANSWER` saved; "Not contacted" no longer offered; consent off until someone spoke | Hint under the chips; switch disabled | e2e `no answer, then my leads…` | OK-tested |
+| L24 | My leads without searching the map | `GET /mine` | "My leads" in Follow-ups, from saved details | e2e same | OK-tested |
+| L25 | A tap outside the sheet with changes | — | "You have changes that aren't saved": Keep editing / Discard | e2e same | OK-tested |
+| L26 | Conflict: someone assigned or called it meanwhile, you only typed a note | 409 `LEAD_CHANGED` (checked first in the backend) | Their status and assignee taken, your note kept, Save again | e2e `after a conflict…` | OK-tested |
+| L27 | Picked by an area name; Greater Hyderabad | — | That area searched-for and ticked; "+ Medchal Malkajgiri", "+ Ranga Reddy" | e2e first, `Greater Hyderabad…` | OK-tested |
+| L28 | Sign-out on a shared phone; a district removed | — | Districts, ticks and results forgotten; a removed district's areas drop out of ticks and the search | unit `store.test` | OK-tested |
+| L29 | Over 10 areas ticked | — | Asks first with the map searches it will use and how many are left | (by reading) | OK-untested |
+| L30 | Busy server again and again; signed out mid-search | `SCAN_BUSY`, 401 | Tried up to 5 times, then marked; 401 stops with "Sign in again" | (by reading `store.ts`) | OK-untested |

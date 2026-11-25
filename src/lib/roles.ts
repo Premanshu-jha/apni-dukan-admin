@@ -31,8 +31,9 @@ export function handlesTickets(role: AdminRole | null | undefined, designation: 
 }
 
 /**
- * The bottom bar. A field agent sees only the businesses assigned to them; a support person only their tickets;
- * Tickets (everyone's), Strikes and Team are for super admins; Test mode is under More (five tabs fit a phone).
+ * The bottom bar. A field agent sees only the businesses assigned to them, and Leads; a support person only their
+ * tickets; Tickets (everyone's), Strikes and Team are for super admins, whose Leads is under More (five tabs fit a
+ * phone); Test mode is under More.
  */
 export function tabsFor(role: AdminRole, designation?: Designation | null): Tab[] {
   if (isSupport(role, designation)) {
@@ -49,7 +50,7 @@ export function tabsFor(role: AdminRole, designation?: Designation | null): Tab[
           { to: '/support', label: 'Strikes', icon: '☏' },
           { to: '/team', label: 'Team', icon: '☺' },
         ]
-      : []),
+      : [{ to: '/leads', label: 'Leads', icon: '◎' }]),
     { to: '/more', label: 'More', icon: '☰' },
   ]
 }
