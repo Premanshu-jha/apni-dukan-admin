@@ -86,7 +86,8 @@ reviews walk the list against the code.
 | Test mode | `/test-mode` | Super admin |
 | App releases: per app (Partner / Customer), the screen updates CI sent (Pull back / Put back, Mark urgent / Not urgent any more) and the version numbers (on the Play Store, oldest allowed) | `/app-releases` | Super admin |
 | Analytics: Money (per month and source, monthly money now, CSV per month, Google's fee rates), Subscriptions, People, Bookings, Salons (least used first), App versions; days and pincode filters | `/analytics?s=money&from=&to=&pincode=` | Super admin |
-| More: profile, Analytics, Test mode and App releases (super admin), Sign out | `/more` | Admins |
+| Leads: Areas (district search, area search chips, search on the map, results and lead list), Follow-ups, Funnel | `/leads?view=areas\|due\|funnel` | Field agents (a tab), super admin (from More; Funnel) |
+| More: profile, Leads, Analytics, Test mode and App releases (super admin), Sign out | `/more` | Admins |
 
 ## Flows
 
@@ -266,6 +267,43 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### Unreleased — Leads
+
+Needs the backend's Leads round (V96–V98, `/admin/leads/...`). Merge the backend first; searching areas also needs
+`MAPBOX_TOKEN` on the backend (without it the page says "Searching the map isn't set up yet").
+
+- **Leads** (`/leads`; a tab for field agents, More › Leads for super admins; a card on the home screen): salons and
+  beauty businesses found on the map, area by area, for the team to contact and sign up.
+  - **Pick a city or district** for all of India: type a city, district, area name or pincode ("kukat" finds Medchal
+    Malkajgiri, "has Kukatpally (500072)"; picked that way, Kukatpally goes straight into the area search, ticked);
+    several can be picked, and Hyderabad offers "+ Medchal Malkajgiri" and "+ Ranga Reddy" in one tap. Remembered on
+    this device until sign-out; removing a district drops its areas from the ticks and the search.
+  - **Areas** are pincodes with their post office names. **Search areas** adds chips (name or pincode); the list shows
+    only those, and clearing the search brings every area back. "My areas" for a field agent, "Tick all shown".
+  - **Search on the map:** ticked areas are searched two at a time, with progress and Stop; a busy server is waited
+    for (up to 5 times), an area the map can't place is marked, and a stop (no key, the month's cap, too many this hour,
+    signed out) says what to do in plain words (how many minutes to wait). Over 10 areas asks first, with the map
+    searches it will use. "Map searches this month: n of cap" shows the usage.
+  - **Results:** numbers (found, local, with a phone, on Clozest, high priority, contacted, signed up), areas compared
+    (with "to reach": local, a phone, not on Clozest, not contacted), a dot map coloured by kind, what they offer, and
+    the lead list: best leads first, filters for **On Clozest / Not on Clozest** and the Clozest status, lead status,
+    kind, local or chain, area, with a phone, given to me; search by name, address or phone; 50 at a time; "Copy
+    shown rows" for a sheet. Each business shows its kind, chain, priority (our estimate, not a rating), Clozest
+    status (super admins: a link to the salon), address, hours, **Call** and **Directions** buttons, and the team's
+    work on it. The areas table leads with "To reach"; "Open all week" replaces "7 days".
+  - **Update a lead:** status (Not contacted, No answer, Called, Visited, Interested, Not interested; a line under the
+    chips says what each means; once tried, "Not contacted" is gone; a signed-up lead's status stays), note, call-back
+    date (Tomorrow / In 3 days / Next week in one tap; an overdue one is marked), who works on it (a field agent's new
+    lead is theirs by default; only a super admin gives a lead to someone else), and the owner's WhatsApp consent (only
+    once someone spoke to them, with a mobile; when and who is recorded). Someone else's save meanwhile is shown: what
+    you didn't change takes their values, what you changed stays to save again. A tap outside with unsaved changes
+    asks first. The history (in India time) is below, including phone changes.
+  - **Follow-ups:** call-backs due today or earlier, past ones marked; **My leads**: every lead given to you that was
+    tried, from its saved details (no map search); super admins can see everyone's.
+  - **Funnel** (super admins): per area and per person, saved → contacted → interested → signed up.
+  - Results are searched live and kept only while the tab is open (the map's terms don't allow storing them); the
+    team's own work is always saved.
 
 ### Unreleased — Analytics
 
