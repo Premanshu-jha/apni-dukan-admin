@@ -6,7 +6,7 @@ import { DESIGNATION_LABELS, ROLE_LABELS } from '../../lib/labels'
 import { formatPhone } from '../../lib/phone'
 import { signOutHere } from '../auth/signOut'
 
-/** More: who is signed in, Analytics, Test mode and App releases (super admins), and Sign out. */
+/** More: who is signed in, Leads, Analytics, Test mode and App releases (super admins), and Sign out. */
 export function More() {
   const me = useAdmin()
   const qc = useQueryClient()
@@ -21,6 +21,15 @@ export function More() {
           </Pill>
         </div>
       </Card>
+      {me.adminRole === 'SUPER_ADMIN' && (
+        <Link
+          to="/leads"
+          className="flex min-h-12 items-center justify-between rounded-xl border border-line bg-surface px-4 font-semibold hover:bg-raised"
+        >
+          <span>◎ Leads (salons on the map)</span>
+          <span aria-hidden>›</span>
+        </Link>
+      )}
       {me.adminRole === 'SUPER_ADMIN' && (
         <Link
           to="/analytics"

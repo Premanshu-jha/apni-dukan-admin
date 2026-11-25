@@ -4,6 +4,7 @@ import { authApi } from '../../api/auth'
 import { useSession } from '../../store/session'
 import { forgetAdminCodeSent } from './adminCodeSent'
 import { forgetReturn } from './flow'
+import { useLeads } from '../leads/store'
 
 /** How long sign-out lets the backend's logout run in the background before giving up on it. */
 const LOGOUT_TIMEOUT_MS = 4000
@@ -37,6 +38,7 @@ export function forgetThisPerson(qc: QueryClient) {
   forgetReturn()
   forgetAdminCodeSent()
   forgetTicketDrafts()
+  useLeads.getState().reset()
   void qc.cancelQueries()
   qc.clear()
 }

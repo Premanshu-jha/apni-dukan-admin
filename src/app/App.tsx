@@ -7,6 +7,7 @@ import { NameStep } from '../features/auth/NameStep'
 import { PhoneStep } from '../features/auth/PhoneStep'
 import { RecoverStep } from '../features/auth/RecoverStep'
 import { More } from '../features/more/More'
+import { Leads } from '../features/leads/Leads'
 import { Dashboard } from '../features/shops/Dashboard'
 import { ShopDetail } from '../features/shops/ShopDetail'
 import { ShopList } from '../features/shops/ShopList'
@@ -44,6 +45,7 @@ export function App() {
               <Route index element={<Dashboard />} />
               <Route path="/shops" element={<ShopList />} />
               <Route path="/shops/:id" element={<ShopDetail />} />
+              <Route path="/leads" element={<Leads />} />
             </Route>
             <Route element={<TicketsOnly />}>
               <Route path="/tickets" element={<TicketList />} />
