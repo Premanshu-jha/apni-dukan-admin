@@ -119,7 +119,8 @@ useSession.subscribe((now, before) => {
 
 /** @param fresh ask for the whole answer: no If-None-Match, and past any cache on the way */
 async function send<T>(method: string, path: string, opts: Options, fresh = false): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers }
+  // Which app this is, for the Analytics' active people (the team's own use counted apart from customers and salons)
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Clozest-Client': 'admin-web', ...opts.headers }
   const form = typeof FormData !== 'undefined' && opts.body instanceof FormData
   // A file upload: the browser sets the multipart Content-Type (with its boundary) itself.
   if (opts.body !== undefined && !form) headers['Content-Type'] = 'application/json'
@@ -201,4 +202,37 @@ export async function api<T>(method: string, path: string, opts: Options = {}): 
     }
     throw e
   }
+}
+
+/**
+ * Downloads a file the backend makes for the signed-in person (a month's payments as CSV): the sign-in token can't
+ * ride a plain link, so it is fetched here and handed over as a Blob. Refreshes the session once on a 401; an error
+ * answer becomes an ApiError like any other call's.
+ */
+export async function apiFile(path: string): Promise<Blob> {
+  const once = async (): Promise<Response> => {
+    const token = useSession.getState().accessToken
+    try {
+      return await fetch(API_URL + path, {
+        headers: { 'X-Clozest-Client': 'admin-web', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        cache: 'no-store',
+      })
+    } catch {
+      throw ApiError.network()
+    }
+  }
+  let res = await once()
+  if (res.status === 401) {
+    if (await refreshSession()) res = await once()
+    // Still signed in here: the refresh itself failed (offline), so say that, as api() does
+    else if (useSession.getState().refreshToken) throw ApiError.network()
+  }
+  if (res.ok) return res.blob()
+  let body: Partial<ErrorBody> = {}
+  try {
+    body = (await res.json()) as ErrorBody
+  } catch {
+    /* not JSON: keep the default message */
+  }
+  throw new ApiError(res.status, body, null)
 }

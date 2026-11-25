@@ -64,6 +64,8 @@ export interface Call {
   path: string
   body: unknown
   auth: string | null
+  /** X-Clozest-Client: which app made the call */
+  client: string | null
   /** When it arrived (ms), to check the waits between retries. */
   at: number
 }
@@ -252,8 +254,32 @@ export class MockApi {
     this.appReleases[app].releases.push({
       build, nativeLevel: 1, versionName: '0.30.0', commitSha: 'a1b2c3d4e5f6', sizeBytes: 1_167_104, status,
       createdAt: at, publishedAt: status === 'UPLOADING' ? null : at, changedAt: null, changedByName: null,
+      urgent: false, urgentNote: null, urgentAt: null, urgentByName: null,
     })
     this.appReleases[app].releases.sort((a, b) => (b.build as number) - (a.build as number))
+  }
+  /**
+   * Analytics (AnalyticsService/AdminAnalyticsController): the answers per section, in the backend's shapes. Tests
+   * change them; the fee rates are saved like the backend's (version, 409 SETTINGS_CHANGED).
+   */
+  analytics = {
+    fees: { playFeeBps: 1500, userChoiceFeeBps: 1100, version: 0, changedAt: null as string | null, changedByName: null as string | null },
+    months: [] as Json[],
+    recurring: { salons: 0, monthlyPaise: 0, bySource: [] as Json[] } as Json,
+    subscriptions: {
+      trial: 0, trialWithAutoPay: 0, paying: 0,
+      payingBySource: [
+        { source: 'WEBSITE', salons: 0, renewing: 0 }, { source: 'APP_RAZORPAY', salons: 0, renewing: 0 }, { source: 'GOOGLE_PLAY', salons: 0, renewing: 0 },
+      ],
+      grace: 0, lapsed: 0, paymentProblems: 0, months: [], trialsEnding: [], problems: [],
+    } as Json,
+    people: { accounts: [], salons: [], salonsEverApproved: 0, signups: [], salonsRegistered: [], salonsApproved: [], approvalHoursMedian: null, activeDay: [], activeToday: [], activeWeek: [], activeMonth: [] } as Json,
+    bookings: { created: [], visits: [], visitsByStatus: [], busiestHours: [], topAreas: [] } as Json,
+    byPincode: {} as Record<string, { created: Json[]; visits: Json[] }>,
+    salons: [] as Json[],
+    quietSalons: 0,
+    versions: [] as Json[],
+    csv: 'Date (India),Salon\r\n',
   }
   testPhones: Json[] = []
   testEmails: Json[] = []
@@ -596,7 +622,7 @@ export class MockApi {
     const raw = req.postData()
     const body = raw ? JSON.parse(raw) : undefined
     const auth = req.headers()['authorization'] ?? null
-    this.calls.push({ method, path: url.pathname + url.search, body, auth, at: Date.now() })
+    this.calls.push({ method, path: url.pathname + url.search, body, auth, client: req.headers()['x-clozest-client'] ?? null, at: Date.now() })
     const p = url.pathname.replace(P, '')
     for (const [suffix, ms] of this.slow) if (p.endsWith(suffix)) await new Promise((r) => setTimeout(r, ms))
     const lost = [...this.loseAnswer].find((suffix) => p.endsWith(suffix))
@@ -1390,6 +1416,24 @@ export class MockApi {
       Object.assign(r, { status: pull ? 'PULLED' : 'LIVE', changedAt: new Date().toISOString(), changedByName: this.user.name })
       return ok(200, r)
     }
+    const urgency = p.match(/^\/admin\/app-releases\/([^/]+)\/(\d+)\/(urgent|not-urgent)$/)
+    if (urgency && method === 'POST') {
+      // As AppReleases.markUrgent / notUrgent
+      if (!this.appReleases[urgency[1]]) return fail(404, 'NOT_FOUND', 'App not found')
+      if (!isSuper) return superOnly()
+      const r = this.appReleases[urgency[1]].releases.find((x) => x.build === Number(urgency[2]))
+      if (!r) return fail(404, 'NOT_FOUND', 'Release not found')
+      if (urgency[3] === 'not-urgent') {
+        Object.assign(r, { urgent: false, urgentNote: null, urgentAt: null, urgentByName: null })
+        return ok(200, r)
+      }
+      const note = typeof body?.note === 'string' ? body.note.trim().replace(/\s+/g, ' ') : ''
+      if (note.length < 3 || note.length > 120) return invalid({ note: 'not valid' })
+      if (r.status !== 'LIVE') return fail(409, 'RELEASE_NOT_LIVE', "This build isn't live (any more).")
+      if (r.urgent && r.urgentNote !== note) return fail(409, 'ALREADY_URGENT', `Someone marked this release urgent already: ${r.urgentNote}`)
+      if (!r.urgent) Object.assign(r, { urgent: true, urgentNote: note, urgentAt: new Date().toISOString(), urgentByName: this.user.name })
+      return ok(200, r)
+    }
     const releaseSettings = p.match(/^\/admin\/app-releases\/([^/]+)\/settings$/)
     if (releaseSettings && method === 'PUT') {
       const app = this.appReleases[releaseSettings[1]]
@@ -1410,6 +1454,80 @@ export class MockApi {
         changedAt: new Date().toISOString(), changedByName: this.user.name,
       }
       return ok(200, app.settings)
+    }
+    // ---------- analytics (super admins only: 403 SUPER_ADMIN_ONLY for the rest of the team) ----------
+    if (p.startsWith('/admin/analytics/')) {
+      if (!isSuper) return superOnly()
+      const a = this.analytics
+      const day = /^\d{4}-\d{2}-\d{2}$/
+      const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10)
+      const range = () => {
+        const to = url.searchParams.get('to') ?? today
+        const from = url.searchParams.get('from') ?? new Date(Date.parse(to) - 29 * 86_400_000).toISOString().slice(0, 10)
+        // As LocalDate.parse: a day that doesn't exist (2026-02-30) is refused; `to` from 2020 on, not after tomorrow
+        const real = (d: string) => day.test(d) && !Number.isNaN(Date.parse(d)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d
+        if (!real(from)) return { error: invalid({ from: 'not valid' }) }
+        if (!real(to) || to < '2020-01-01' || to > new Date(Date.parse(today) + 86_400_000).toISOString().slice(0, 10)) return { error: invalid({ to: 'not valid' }) }
+        if (from > to || Date.parse(to) - Date.parse(from) > 365 * 86_400_000) return { error: invalid({ from: 'not valid' }) }
+        return { from, to }
+      }
+      const pin = url.searchParams.get('pincode')
+      if (pin !== null && !/^[1-9]\d{5}$/.test(pin)) return invalid({ pincode: 'not valid' })
+      if (p === '/admin/analytics/money' && method === 'GET') {
+        const months = Number(url.searchParams.get('months') ?? 12)
+        if (!Number.isInteger(months) || months < 1 || months > 36) return invalid({ months: 'not valid' })
+        // As the backend: every month of the last `months`, oldest first, a month without payments all zeros
+        const zero = (source: string | null) => ({ source, payments: 0, salons: 0, grossPaise: 0, refundsPaise: 0, refundCount: 0, razorpayFeePaise: 0, googleFeeEstimatePaise: 0, netPaise: 0 })
+        const list: Json[] = []
+        for (let i = months - 1; i >= 0; i--) {
+          const [y, m] = today.slice(0, 7).split('-').map(Number)
+          const month = new Date(Date.UTC(y, m - 1 - i, 1)).toISOString().slice(0, 7)
+          list.push(a.months.find((x) => x.month === month) ?? { month, total: zero(null), bySource: [] })
+        }
+        return ok(200, { months: list, recurring: a.recurring, fees: a.fees })
+      }
+      const csv = p.match(/^\/admin\/analytics\/money\/(.+)\.csv$/)
+      if (csv && method === 'GET') {
+        if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(csv[1])) return invalid({ month: 'not valid' })
+        return route.fulfill({ status: 200, headers: { ...this.cors(), 'Content-Type': 'text/csv; charset=UTF-8' }, body: a.csv })
+      }
+      if (p === '/admin/analytics/settings' && method === 'GET') return ok(200, a.fees)
+      if (p === '/admin/analytics/settings' && method === 'PUT') {
+        const bps = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 3000
+        const wrong: Json = {}
+        if (!bps(body.playFeeBps)) wrong.playFeeBps = 'must be between 0 and 3000'
+        if (!bps(body.userChoiceFeeBps)) wrong.userChoiceFeeBps = 'must be between 0 and 3000'
+        if (Object.keys(wrong).length) return invalid(wrong)
+        if (body.version !== a.fees.version) return fail(409, 'SETTINGS_CHANGED', 'Someone else changed these rates. Look again.')
+        a.fees = { playFeeBps: body.playFeeBps, userChoiceFeeBps: body.userChoiceFeeBps, version: a.fees.version + 1, changedAt: new Date().toISOString(), changedByName: this.user.name }
+        return ok(200, a.fees)
+      }
+      if (p === '/admin/analytics/subscriptions' && method === 'GET') return ok(200, a.subscriptions)
+      if (p === '/admin/analytics/people' && method === 'GET') {
+        const r = range()
+        if ('error' in r) return r.error
+        return ok(200, { ...a.people, from: r.from, to: r.to })
+      }
+      if (p === '/admin/analytics/bookings' && method === 'GET') {
+        const r = range()
+        if ('error' in r) return r.error
+        if (pin) {
+          const one = a.byPincode[pin] ?? { created: [], visits: [] }
+          return ok(200, { from: r.from, to: r.to, pincode: pin, created: one.created, visits: one.visits, visitsByStatus: [], busiestHours: [], topAreas: [] })
+        }
+        return ok(200, { ...a.bookings, from: r.from, to: r.to, pincode: null })
+      }
+      if (p === '/admin/analytics/salons' && method === 'GET') {
+        const sort = url.searchParams.get('sort') ?? 'quiet'
+        if (sort !== 'quiet' && sort !== 'bookings') return invalid({ sort: 'not valid' })
+        const page = Number(url.searchParams.get('page') ?? 0)
+        const rows = a.salons
+          .filter((x) => !pin || x.pincode === pin)
+          .sort((x, y) => (sort === 'quiet' ? String(x.lastActiveDay ?? '').localeCompare(String(y.lastActiveDay ?? '')) : (y.bookings30d as number) - (x.bookings30d as number)))
+        return ok(200, { salons: rows.slice(page * 50, page * 50 + 50), more: rows.length > page * 50 + 50, quietSalons: a.quietSalons })
+      }
+      if (p === '/admin/analytics/app-versions' && method === 'GET') return ok(200, { today, days: a.versions })
+      return fail(404, 'NOT_FOUND', 'Not found')
     }
     if (p === '/admin/test-mode') {
       if (!isSuper) return superOnly()
@@ -1614,7 +1732,7 @@ export class MockApi {
   private cors() {
     return {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-None-Match',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-None-Match, X-Clozest-Client',
       'Access-Control-Expose-Headers': 'Retry-After, ETag',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     }

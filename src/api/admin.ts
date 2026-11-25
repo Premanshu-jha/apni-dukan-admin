@@ -1,7 +1,14 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { api } from './client'
+import { api, apiFile } from './client'
 import { ApiError } from './errors'
 import type {
+  BookingsView,
+  FeeSettings,
+  MoneyView,
+  PeopleView,
+  SalonsView,
+  SubscriptionsView,
+  VersionsView,
   AddressDeclineIn,
   AppName,
   AppRelease,
@@ -37,6 +44,16 @@ import type {
 import type { Decision } from '../lib/rules'
 
 const A = '/api/v1/admin'
+
+/** Days in India's calendar, both included (yyyy-MM-dd). */
+export interface DayRange {
+  from: string
+  to: string
+}
+
+function rangeQuery(r: DayRange): string {
+  return `from=${r.from}&to=${r.to}`
+}
 
 /** Which businesses a super admin's list shows: all, those nobody is assigned, or one agent's (their id). */
 export type ShopFilter = 'ALL' | 'UNASSIGNED' | (string & {})
@@ -176,8 +193,23 @@ export const adminApi = {
     api<AppReleasePage>('GET', `${A}/app-releases/${app}${before ? `?before=${before}` : ''}`),
   pullBackRelease: (app: AppName, build: number) => write<AppRelease>('POST', `${A}/app-releases/${app}/${build}/pull-back`),
   restoreRelease: (app: AppName, build: number) => write<AppRelease>('POST', `${A}/app-releases/${app}/${build}/restore`),
+  markUrgent: (app: AppName, build: number, note: string) =>
+    write<AppRelease>('POST', `${A}/app-releases/${app}/${build}/urgent`, { note }),
+  notUrgent: (app: AppName, build: number) => write<AppRelease>('POST', `${A}/app-releases/${app}/${build}/not-urgent`),
   saveAppUpdateSettings: (app: AppName, body: { minVersionCode: number | null; storeVersionCode: number | null; version: number }) =>
     write<AppUpdateSettings>('PUT', `${A}/app-releases/${app}/settings`, body),
+  analyticsMoney: (months: number) => api<MoneyView>('GET', `${A}/analytics/money?months=${months}`),
+  /** A month's payments (yyyy-MM) as a CSV file */
+  analyticsMoneyCsv: (month: string) => apiFile(`${A}/analytics/money/${month}.csv`),
+  saveAnalyticsSettings: (body: { playFeeBps: number; userChoiceFeeBps: number; version: number }) =>
+    write<FeeSettings>('PUT', `${A}/analytics/settings`, body),
+  analyticsSubscriptions: () => api<SubscriptionsView>('GET', `${A}/analytics/subscriptions`),
+  analyticsPeople: (range: DayRange) => api<PeopleView>('GET', `${A}/analytics/people?${rangeQuery(range)}`),
+  analyticsBookings: (range: DayRange, pincode: string | null) =>
+    api<BookingsView>('GET', `${A}/analytics/bookings?${rangeQuery(range)}${pincode ? `&pincode=${pincode}` : ''}`),
+  analyticsSalons: (sort: 'quiet' | 'bookings', pincode: string | null, page: number) =>
+    api<SalonsView>('GET', `${A}/analytics/salons?sort=${sort}&page=${page}${pincode ? `&pincode=${pincode}` : ''}`),
+  analyticsVersions: () => api<VersionsView>('GET', `${A}/analytics/app-versions`),
   testMode: () => api<TestModeState>('GET', `${A}/test-mode`),
   testModeOn: (hours: number) => write<TestModeState>('PUT', `${A}/test-mode`, { hours }),
   testModeOff: () => write<TestModeState>('DELETE', `${A}/test-mode`),
@@ -209,6 +241,13 @@ export const keys = {
   coverage: ['admin', 'team', 'coverage'] as const,
   testMode: ['admin', 'test-mode'] as const,
   appReleases: (app: AppName) => ['admin', 'app-releases', app] as const,
+  analytics: ['admin', 'analytics'] as const,
+  analyticsMoney: (months: number) => ['admin', 'analytics', 'money', months] as const,
+  analyticsSubscriptions: ['admin', 'analytics', 'subscriptions'] as const,
+  analyticsPeople: (r: DayRange) => ['admin', 'analytics', 'people', r.from, r.to] as const,
+  analyticsBookings: (r: DayRange, pincode: string | null) => ['admin', 'analytics', 'bookings', r.from, r.to, pincode] as const,
+  analyticsSalons: (sort: string, pincode: string | null) => ['admin', 'analytics', 'salons', sort, pincode] as const,
+  analyticsVersions: ['admin', 'analytics', 'versions'] as const,
   tickets: ['admin', 'tickets'] as const,
   ticketList: (view: TicketView, assignee: string | null) => ['admin', 'tickets', 'list', view, assignee] as const,
   ticketCounts: ['admin', 'tickets', 'counts'] as const,
@@ -312,6 +351,49 @@ export function useAppReleases(app: AppName) {
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => (last.more ? last.releases[last.releases.length - 1]?.build : undefined),
   })
+}
+
+// Analytics: worked out hourly by the backend, so nothing here asks more often than every 5 minutes
+const ANALYTICS_STALE = 5 * 60 * 1000
+
+export function useAnalyticsMoney(months: number) {
+  return useQuery({ queryKey: keys.analyticsMoney(months), queryFn: () => adminApi.analyticsMoney(months), staleTime: ANALYTICS_STALE })
+}
+
+export function useAnalyticsSubscriptions() {
+  return useQuery({ queryKey: keys.analyticsSubscriptions, queryFn: adminApi.analyticsSubscriptions, staleTime: ANALYTICS_STALE })
+}
+
+export function useAnalyticsPeople(range: DayRange) {
+  return useQuery({
+    queryKey: keys.analyticsPeople(range),
+    queryFn: () => adminApi.analyticsPeople(range),
+    staleTime: ANALYTICS_STALE,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useAnalyticsBookings(range: DayRange, pincode: string | null) {
+  return useQuery({
+    queryKey: keys.analyticsBookings(range, pincode),
+    queryFn: () => adminApi.analyticsBookings(range, pincode),
+    staleTime: ANALYTICS_STALE,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useAnalyticsSalons(sort: 'quiet' | 'bookings', pincode: string | null) {
+  return useInfiniteQuery({
+    queryKey: keys.analyticsSalons(sort, pincode),
+    queryFn: ({ pageParam }) => adminApi.analyticsSalons(sort, pincode, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (last.more ? pages.length : undefined),
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function useAnalyticsVersions() {
+  return useQuery({ queryKey: keys.analyticsVersions, queryFn: adminApi.analyticsVersions, staleTime: ANALYTICS_STALE })
 }
 
 export function useTestMode() {

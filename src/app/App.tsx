@@ -14,6 +14,7 @@ import { Support } from '../features/support/Support'
 import { AddMember, EditMember } from '../features/team/MemberForm'
 import { Team } from '../features/team/Team'
 import { TestMode } from '../features/testmode/TestMode'
+import { Analytics } from '../features/analytics/Analytics'
 import { AppReleases } from '../features/releases/AppReleases'
 import { TicketDetail } from '../features/tickets/TicketDetail'
 import { TicketList } from '../features/tickets/TicketList'
@@ -56,6 +57,7 @@ export function App() {
               <Route path="/team/:id" element={<EditMember />} />
               <Route path="/test-mode" element={<TestMode />} />
               <Route path="/app-releases" element={<AppReleases />} />
+              <Route path="/analytics" element={<Analytics />} />
             </Route>
             <Route
               path="*"

@@ -483,3 +483,42 @@ Backend tests here are `AppReleasesIntegrationTest` (written `ARI.<method>`); e2
 | 344 | Releases live, no Play Store version filled in | — | A warning: Play Store phones get none of these yet | ARI (the hold) | e2e:releases "a warning when releases are live…" | OK-tested |
 | 345 | The list can't be read again (offline) or Show older fails | network error | A banner: may be out of date, with Try again | — | (by reading) | OK-untested |
 | 346 | A release CI didn't finish | `UPLOADING` | "Not finished: … Phones never get it, nothing to do; the next merge sends a new one." | ARI | e2e:releases | OK-tested |
+
+## Analytics (backend V93–V94)
+
+Backend tests here are `AnalyticsIntegrationTest` (written `ANI.<method>`); e2e tests are `e2e/analytics.spec.ts`;
+unit tests `src/features/analytics/analytics.test.ts` (written `unit`).
+
+| # | Scenario | What the API answers | What the screen does | Backend test | App test | Verdict |
+|---|---|---|---|---|---|---|
+| 360 | A super admin opens More | — | "Analytics" link; the page opens on Money | — | e2e:analytics "a super admin finds Analytics from More…" | OK-tested |
+| 361 | A field agent or support person | 403 `SUPER_ADMIN_ONLY` | No link in More; `/analytics` goes back to their home; no analytics call is made | ANI.onlyASuperAdminSeesAnalytics | e2e:analytics "a field agent has no Analytics link…" | OK-tested |
+| 362 | Money | `GET /admin/analytics/money?months=12` → every month (zeros included), per source, monthly money now, fee rates | Tiles (monthly money now, this month so far), a chart of what is left per month, month cards with "Show by payment source"; "Google's fee is an estimate" said once | ANI.moneyIsCounted… | e2e:analytics same | OK-tested |
+| 363 | Money, no payments at all yet | all months zero | Zeros, nothing broken; Download disabled for a month without payments | (by reading) | e2e:analytics "Google's fee rates…" (empty page) | OK-tested |
+| 364 | Download a month's payments | `GET /admin/analytics/money/2026-11.csv` (with the sign-in) | A file `clozest-payments-2026-11.csv`; a failure says why under the button | ANI.moneyIsCounted… (CSV, formula-safe) | e2e:analytics (download, Bearer) | OK-tested |
+| 365 | Change Google's fee rates | `PUT /admin/analytics/settings` {bps, version} | Percent with up to 2 decimals, 0–30 checked before Save; 409 `SETTINGS_CHANGED` says another super admin changed them and the page shows theirs | ANI.moneyIsCounted… (rates, 409, 400) | e2e:analytics "Google's fee rates…"; unit | OK-tested |
+| 366 | Subscriptions | `GET /admin/analytics/subscriptions` | Tiles; paying by source and renewing; each month started / stopped; trials ending in 7 days and payment problems, each a link to the salon | ANI.subscriptionsShowWhereEachSalonStands | e2e:analytics "subscriptions…" | OK-tested |
+| 367 | People | `GET /admin/analytics/people?from&to` | Accounts and salons now, signups and approvals in the range, active today / 7 / 30 days (app and website apart), a chart of active customers per day | ANI.theJobWorksOut… | (by reading) | OK-untested |
+| 368 | Bookings, all areas and one pincode | `GET /admin/analytics/bookings?from&to[&pincode]` | Made each day, outcomes with %, busiest hours, busiest areas; with a pincode only made and visits; "Type all 6 digits" until it is a pincode | ANI.theJobWorksOut… | e2e:analytics "bookings follow the days and the area…" | OK-tested |
+| 369 | Days back to front, longer than a year, or in the future | (not sent) | A warning instead of the section; nothing asked | 400 `VALIDATION_FAILED` (ANI) | e2e:analytics; unit | OK-tested |
+| 370 | Reload or Back on the page | — | The section, days and pincode come back (they are in the address) | — | e2e:analytics (reload keeps the pincode) | OK-tested |
+| 371 | Salons | `GET /admin/analytics/salons?sort=quiet|bookings&page` | Least used first with Quiet / Active, last opened, 30-day numbers, setup gaps; Most bookings first; Show more salons (50 a page) | ANI.theJobWorksOut… | e2e:analytics "salons are listed…" | OK-tested |
+| 372 | App versions | `GET /admin/analytics/app-versions` | Per app, Play Store installs before test APKs, newest first: today so far, yesterday, most in a day this week | ANI.appVersionsAreCounted… | e2e:analytics "app versions…"; unit | OK-tested |
+| 373 | Many at once | answers are small (daily totals) and read from the read copy | Each section asks at most every 5 minutes (staleTime); changing days keeps the old numbers on screen until the new ones arrive | (by reading) | — | OK-untested |
+| 374 | A chart's exact numbers | — | Hover or Tab to a bar shows its value; "Show as a table" lists them all | — | e2e:analytics (table) | OK-tested |
+| 375 | The header | every call carries `X-Clozest-Client: admin-web` | Nothing on screen | ANI.eachPersonIsCounted… (a customer claiming admin-web isn't counted as the team) | e2e:analytics (every analytics call) | OK-tested |
+| 376 | Mark a live release urgent | `POST /admin/app-releases/partner/250/urgent` {note} | Asked first ("only for serious fixes"), a note of 3–120 characters needed; then "Urgent" and the note on the card, with who marked it | ARI.anUrgentRelease… | e2e:releases "a serious fix is marked urgent…" | OK-tested |
+| 377 | Take it back | `POST …/not-urgent` | Mark urgent offered again; phones stop showing the banner at their next check | ARI same | e2e:releases same | OK-tested |
+| 378 | A release CI marked from an `[urgent]` PR | the release says `urgent`, `urgentByName` null | "Urgent: <PR title> · from an [urgent] PR" | ARI same | e2e:releases "a release CI marked urgent…" | OK-tested |
+| 379 | Mark urgent on a release that was pulled back meanwhile | 409 `RELEASE_NOT_LIVE` | The reason under the button; the list is read again | ARI same | (by reading) | OK-untested |
+| 380 | Two super admins mark the same release urgent with different notes | the second: 409 `ALREADY_URGENT` | "Another super admin marked this release urgent first…"; the first note stays | ARI.anUrgentRelease… | (by reading) | OK-untested |
+| 381 | Not urgent any more | asked first (phones stop showing the banner; those that restarted keep the fix; it stays live) | e2e:releases "a serious fix is marked urgent…" | ARI same | e2e:releases same | OK-tested |
+| 382 | A sheet closed while its request is on its way (Escape) | — | Not closable while busy; a failure after it closed is shown on the card | — | (by reading) | OK-untested |
+| 383 | Reading the numbers again failed (window refocused, offline) | — | Every section: "Couldn't load the newest numbers…" with Try again, the old numbers kept; "Updating…" while other days or an area load | — | (by reading `Freshness`) | OK-untested |
+| 384 | A chart on a phone | — | Drawn at the phone's width (12 px text); tap a bar for its number; months below ₹0 below the line; labels never overlap | — | unit (helpers) | OK-untested |
+| 385 | A link with a day that doesn't exist (2026-02-30), or before 2020 | (not sent) | The last 30 days instead | AN (400 if sent) | e2e:analytics "bookings follow…" | OK-tested |
+| 386 | Money's months, Salons' order | in the address (`months`, `sort`) | Kept on reload, Back from a salon's page and in a shared link | — | e2e:analytics "salons are listed…" | OK-tested |
+| 387 | A busiest area tapped | `GET /bookings?…&pincode=` | Only that area | — | e2e:analytics "bookings follow…" | OK-tested |
+| 388 | A pincode starting with 0 | (not sent) | "Indian pincodes don't start with 0" | — | e2e:analytics same | OK-tested |
+| 389 | Salons in a pincode with none approved | — | "None in 500087" with "See all areas" | — | (by reading) | OK-untested |
+| 390 | App versions after an urgent fix | — | Says it counts the installed app (APK) version; screen updates aren't counted there (see App releases) | — | (by reading) | OK-untested |

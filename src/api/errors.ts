@@ -74,6 +74,7 @@ export const ADMIN_MESSAGES: Record<string, string> = {
   RELEASE_NOT_LIVE: 'This release was already pulled back (maybe by another super admin). The list now shows what it is.',
   RELEASE_NOT_PULLED: 'This release is already live again (maybe put back by another super admin).',
   MIN_ABOVE_STORE: "The oldest allowed version can't be newer than the version on the Play Store: phones would be told to update to a version Google doesn't have.",
+  ALREADY_URGENT: 'Another super admin marked this release urgent first. Their note stays: look again.',
   SETTINGS_CHANGED: 'Another super admin changed these numbers after you opened the page. The page now shows theirs: check and save again.',
   CANT_REMOVE_YOURSELF: "You can't remove yourself from the team. Ask another super admin.",
   MEMBER_CHANGED: 'Someone changed this member after you opened it. Reload and try again.',
