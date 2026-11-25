@@ -21,9 +21,10 @@ export function AppReleases() {
   return (
     <Page title="App releases" back="/more">
       <Banner tone="info">
-        After each merge, the app&apos;s new screens arrive here and go live. A phone fetches them the next time the
-        app is opened and uses them from the opening after that. If a release has a problem, pull it back: phones move
-        back to the release before it the same way, over their next two openings.
+        After each merge, the app&apos;s new screens arrive here and go live. Phones fetch them quietly and use them
+        from the next opening, or when the app comes back after being left for 5 minutes. For a serious fix, Mark
+        urgent: open phones show &quot;A fix for the app is ready&quot; with Restart (a PR titled [urgent] … does this by
+        itself). If a release has a problem, pull it back: phones move back to the release before it the same way.
       </Banner>
       <div className="flex gap-2" role="group" aria-label="Which app">
         {APPS.map((a) => (
@@ -130,6 +131,7 @@ function ReleaseCard({ app, release: r, newest, before }: { app: AppName; releas
         <p className="text-lg font-semibold">Build {r.build}</p>
         <div className="flex gap-2">
           {newest && <Pill tone="brand">Newest live</Pill>}
+          {r.urgent && r.status === 'LIVE' && <Pill tone="warn">Urgent</Pill>}
           <StatusPill status={r.status} />
         </div>
       </div>
@@ -147,12 +149,23 @@ function ReleaseCard({ app, release: r, newest, before }: { app: AppName; releas
           ? ` · ${r.status === 'PULLED' ? 'pulled back' : 'put back'} by ${r.changedByName}, ${dateTimeIst(r.changedAt)}`
           : null}
       </p>
+      {r.urgent && r.status === 'LIVE' && (
+        <p className="text-sm">
+          <span className="font-semibold">Urgent:</span> {r.urgentNote}
+          <span className="text-muted">
+            {' '}
+            · {r.urgentByName ? `marked by ${r.urgentByName}` : 'from an [urgent] PR'}
+            {r.urgentAt ? `, ${dateTimeIst(r.urgentAt)}` : ''}
+          </span>
+        </p>
+      )}
       {error !== null && !sheetOpen && <Banner tone="bad">{explain(error)}</Banner>}
       {r.status === 'LIVE' && (
         <Button variant="danger" disabled={busy} onClick={() => setAsking(true)}>
           Pull back
         </Button>
       )}
+      {r.status === 'LIVE' && <Urgency app={app} release={r} />}
       {r.status === 'PULLED' && (
         <Button variant="secondary" busy={busy} onClick={() => void change(() => adminApi.restoreRelease(app, r.build))}>
           Put back
@@ -174,6 +187,109 @@ function ReleaseCard({ app, release: r, newest, before }: { app: AppName; releas
         </Button>
       </Sheet>
     </Card>
+  )
+}
+
+/**
+ * Mark urgent (asked first, with what it fixes) or take it back. Urgent: phones that are open get it within about 10
+ * minutes and show "A fix for the app is ready" with Restart; every other release reaches phones silently.
+ */
+function Urgency({ app, release: r }: { app: AppName; release: AppRelease }) {
+  const qc = useQueryClient()
+  const sending = useRef(false)
+  const [asking, setAsking] = useState(false)
+  const [undoing, setUndoing] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const clean = note.trim().replace(/\s+/g, ' ')
+  // Urgent changed (here, by someone else, or after a 409): no sheet left open for the other state (a 409's
+  // message stays on the card until the next try)
+  useEffect(() => {
+    setAsking(false)
+    setUndoing(false)
+  }, [r.urgent])
+  const noteError = clean.length > 120 ? 'At most 120 characters' : undefined
+
+  async function send(call: () => Promise<AppRelease>) {
+    if (sending.current) return
+    sending.current = true
+    setBusy(true)
+    setError(null)
+    try {
+      await call()
+      setAsking(false)
+      setUndoing(false)
+      setNote('')
+    } catch (e) {
+      setError(e)
+    } finally {
+      sending.current = false
+      setBusy(false)
+      void qc.invalidateQueries({ queryKey: keys.appReleases(app) })
+    }
+  }
+
+  const who = app === 'partner' ? 'partner' : 'customer'
+  if (r.urgent) {
+    return (
+      <>
+        <Button variant="secondary" disabled={busy} onClick={() => setUndoing(true)}>
+          Not urgent any more
+        </Button>
+        {error !== null && !undoing && <Banner tone="bad">{explain(error)}</Banner>}
+        <Sheet open={undoing} title={`Build ${r.build} not urgent any more?`} onClose={() => !busy && setUndoing(false)}>
+          <p>
+            Phones stop showing &quot;A fix for the app is ready&quot; within about 10 minutes. Phones that already
+            restarted keep the fix, and the release stays live: everyone else still gets it, silently.
+          </p>
+          {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
+          <Button busy={busy} onClick={() => void send(() => adminApi.notUrgent(app, r.build))}>
+            Not urgent any more
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setUndoing(false)}>
+            Keep it urgent
+          </Button>
+        </Sheet>
+      </>
+    )
+  }
+  return (
+    <>
+      <Button variant="secondary" disabled={busy} onClick={() => setAsking(true)}>
+        Mark urgent
+      </Button>
+      {error !== null && !asking && <Banner tone="bad">{explain(error)}</Banner>}
+      <Sheet open={asking} title={`Mark build ${r.build} urgent?`} onClose={() => !busy && setAsking(false)}>
+        <p>
+          Phones with the {who} app from the Play Store that are open get it within about 10 minutes and see &quot;A
+          fix for the app is ready&quot; with Restart; the others get it the next time the app is opened. The website
+          isn&apos;t affected (it updates by itself). Use it only for serious fixes: money, bookings, crashes, privacy,
+          or wrong information people act on. Anything else reaches phones by itself, without a banner.
+        </p>
+        <Field
+          id={`urgent-note-${r.build}`}
+          label="What does it fix?"
+          placeholder="Wrong total on bills"
+          value={note}
+          maxLength={140}
+          onChange={(e) => setNote(e.target.value)}
+          error={noteError}
+          hint="Only for the team (not shown on phones): kept with the release, so you can see later why it was urgent."
+        />
+        {error !== null && <Banner tone="bad">{explain(error)}</Banner>}
+        <Button
+          busy={busy}
+          disabled={clean.length < 3 || noteError !== undefined}
+          onClick={() => void send(() => adminApi.markUrgent(app, r.build, clean))}
+        >
+          Mark urgent
+        </Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setAsking(false)}>
+          Cancel
+        </Button>
+      </Sheet>
+    </>
   )
 }
 
