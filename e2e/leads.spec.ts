@@ -289,3 +289,129 @@ test('Greater Hyderabad: its other districts are one tap away', async ({ page, c
   await expect(page.getByRole('button', { name: '+ Ranga Reddy' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '+ Medchal Malkajgiri' })).toBeVisible()
 })
+
+test('searched areas are saved on the page: a reload or another page shows them without searching the map again', async ({ page, context, api }) => {
+  kukatpally(api)
+  api.leads.found['500085'] = [shop('mb-jntu', 'JNTU Hair Studio', { pincode: '500085' })]
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
+  const areas = page.getByRole('list', { name: 'Areas', exact: true })
+  await areas.getByText('500072').click()
+  await page.getByRole('button', { name: 'Search 1 area on the map' }).click()
+  const list = page.getByRole('list', { name: 'Businesses' })
+  await expect(list.getByText("Tia's Beauty Parlour")).toBeVisible()
+  const scansOf = (pin: string) => api.calls.filter((c) => c.method === 'POST' && c.path.endsWith(`/scan/${pin}`)).length
+  expect(scansOf('500072')).toBe(1)
+
+  // Reload, and another page and back: still there, no new map search
+  await page.reload()
+  await expect(list.getByText("Tia's Beauty Parlour")).toBeVisible()
+  await expect(page.getByText(/1 area saved on this page/)).toBeVisible()
+  await expect(areas.getByText(/found, searched just now/)).toBeVisible()
+  await page.getByRole('link', { name: 'Businesses' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Leads' })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Leads' }).first().click()
+  await expect(list.getByText("Tia's Beauty Parlour")).toBeVisible()
+  expect(scansOf('500072')).toBe(1)
+
+  // "Searched (1)" finds it in a long list; ticking only saved areas points to the list
+  await page.getByRole('button', { name: 'Searched (1)' }).click()
+  await expect(areas.getByRole('listitem')).toHaveCount(1)
+  await areas.getByText('500072').click()
+  await page.getByRole('button', { name: 'Already shown below (1 area)' }).click()
+  await expect(page.getByText('1 area already searched: their businesses are in the list below.')).toBeVisible()
+  expect(scansOf('500072')).toBe(1)
+  await page.getByRole('button', { name: 'Clear search (show all areas)' }).click()
+
+  // Saved with a new one: only the new one asks the map
+  await areas.getByText('500072').click()
+  await areas.getByText('500085').click()
+  await page.getByRole('button', { name: 'Show 2 areas (1 saved, 1 new)' }).click()
+  await expect(list.getByText('JNTU Hair Studio')).toBeVisible()
+  expect(scansOf('500072')).toBe(1)
+  expect(scansOf('500085')).toBe(1)
+
+  // Clear asks first; then gone, here and after a reload (once the saved areas would have loaded)
+  await page.getByRole('button', { name: 'Clear saved results' }).click()
+  await page.getByRole('button', { name: 'Keep them' }).click()
+  await expect(list.getByText('JNTU Hair Studio')).toBeVisible()
+  await page.getByRole('button', { name: 'Clear saved results' }).click()
+  await page.getByRole('button', { name: 'Yes, clear' }).click()
+  await expect(list).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Tick areas to search' })).toBeVisible()
+  await expect(page.getByText('No areas searched yet')).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Businesses' })).toHaveCount(0)
+})
+
+test('search again searches only that area, keeps its saved result until the fresh one arrives, and keeps it if that fails', async ({ page, context, api }) => {
+  kukatpally(api)
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
+  const areas = page.getByRole('list', { name: 'Areas', exact: true })
+  await areas.getByText('500072').click()
+  await page.getByRole('button', { name: 'Search 1 area on the map' }).click()
+  const list = page.getByRole('list', { name: 'Businesses' })
+  await expect(list.getByText("Tia's Beauty Parlour")).toBeVisible()
+  const scansOf = (pin: string) => api.calls.filter((c) => c.method === 'POST' && c.path.endsWith(`/scan/${pin}`)).length
+
+  // Other areas ticked but not searched: Search again touches only its own area
+  await areas.getByText('500085').click()
+  await areas.getByText('500090').click()
+  api.leads.found['500072'] = [shop('mb-new', 'New Glow Salon')]
+  await page.getByRole('button', { name: 'Search again (uses map searches): 500072' }).click()
+  await expect(list.getByText('New Glow Salon')).toBeVisible()
+  expect(scansOf('500072')).toBe(2)
+  expect(scansOf('500085') + scansOf('500090')).toBe(0)
+  await expect(page.getByRole('button', { name: 'Search 2 areas on the map' })).toBeVisible()
+
+  // It fails: the saved result stays on screen and after a reload
+  api.leads.scanErrorFor.set('500072', { status: 429, code: 'MAPBOX_CAP_REACHED', message: 'cap' })
+  await page.getByRole('button', { name: 'Search again (uses map searches): 500072' }).click()
+  await expect(page.getByText(/This month's map searches are used up/)).toBeVisible()
+  await expect(list.getByText('New Glow Salon')).toBeVisible()
+  await page.reload()
+  await expect(list.getByText('New Glow Salon')).toBeVisible()
+})
+
+test('the big-search question counts only new areas, and closes when it no longer applies', async ({ page, context, api }) => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ pincode: `5001${String(i).padStart(2, '0')}`, places: `Place ${i}` }))
+  api.leads.districts.push({ district: 'Big District', state: 'Telangana', areas: many })
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  await pickDistrict(page, 'big dis', /Big District/)
+  const areas = page.getByRole('list', { name: 'Areas', exact: true })
+  // Two searched first (saved)
+  await areas.getByText('500100').click()
+  await areas.getByText('500101').click()
+  await page.getByRole('button', { name: 'Search 2 areas on the map' }).click()
+  await expect(page.getByText(/2 areas saved on this page/)).toBeVisible()
+  // All 12 ticked: 10 new, no question
+  await page.getByRole('button', { name: 'Tick all shown (12)' }).click()
+  await page.getByRole('button', { name: 'Show 12 areas (2 saved, 10 new)' }).click()
+  await expect(page.getByText(/new areas use about/)).toHaveCount(0)
+  await expect(page.getByText(/12 areas saved on this page/)).toBeVisible()
+  // 11 new: asks, and the question goes when ticks drop to 10 or fewer
+  api.leads.districts[api.leads.districts.length - 1].areas.push(...Array.from({ length: 11 }, (_, i) => ({ pincode: `5002${String(i).padStart(2, '0')}`, places: `More ${i}` })))
+  await page.reload()
+  await expect(page.getByText(/12 areas saved on this page/)).toBeVisible()
+  await page.getByRole('button', { name: 'Tick all shown (23)' }).click()
+  await page.getByRole('button', { name: 'Show 23 areas (12 saved, 11 new)' }).click()
+  await expect(page.getByText('11 new areas use about 440 to 1,650 of this month\'s map searches', { exact: false })).toBeVisible()
+  await areas.getByText('500200').click()
+  await expect(page.getByText(/new areas use about/)).toHaveCount(0)
+})
+
+test('after clearing saved results the keyboard stays on the area search', async ({ page, context, api }) => {
+  kukatpally(api)
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
+  await page.getByRole('list', { name: 'Areas', exact: true }).getByText('500072').click()
+  await page.getByRole('button', { name: 'Search 1 area on the map' }).click()
+  await page.getByRole('button', { name: 'Clear saved results' }).click()
+  await page.getByRole('button', { name: 'Yes, clear' }).click()
+  await expect(page.getByLabel('Search areas')).toBeFocused()
+})
