@@ -84,8 +84,9 @@ reviews walk the list against the code.
 | Team: members (Edit, Move waiting visits, Remove) and Coverage (pincode → agents) | `/team`, `/team?view=coverage` | Super admin |
 | Add or edit a member: phone, email, name, role, designation, pincodes (chips) | `/team/new`, `/team/:id` | Super admin |
 | Test mode | `/test-mode` | Super admin |
-| App releases: per app (Partner / Customer), the screen updates CI sent (Pull back / Put back) and the version numbers (on the Play Store, oldest allowed) | `/app-releases` | Super admin |
-| More: profile, Test mode and App releases (super admin), Sign out | `/more` | Admins |
+| App releases: per app (Partner / Customer), the screen updates CI sent (Pull back / Put back, Mark urgent / Not urgent any more) and the version numbers (on the Play Store, oldest allowed) | `/app-releases` | Super admin |
+| Analytics: Money (per month and source, monthly money now, CSV per month, Google's fee rates), Subscriptions, People, Bookings, Salons (least used first), App versions; days and pincode filters | `/analytics?s=money&from=&to=&pincode=` | Super admin |
+| More: profile, Analytics, Test mode and App releases (super admin), Sign out | `/more` | Admins |
 
 ## Flows
 
@@ -265,6 +266,34 @@ time), `PHOTO_ORIGIN` (in production the account's exact `https://<account>.r2.c
 add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks search engines not to index it.
 
 ## Changelog
+
+### Unreleased — Analytics
+
+Needs apni-dukan-backend's analytics round (V93–V94: `/admin/analytics/...`, and the `X-Clozest-Client` header
+allowed). Merge the backend first: until it allows the header, the browser would refuse this website's calls.
+
+- **Analytics for super admins** (More › Analytics, `/analytics`): only totals and per-salon figures, worked out by the
+  backend every hour, India's days.
+  - **Money:** per month, paid, refunded, Razorpay's fee (exact), Google's fee (an estimate at the rates on the page,
+    changeable: 15% Play billing, 11% Razorpay picked in the app), and what is left; split by Razorpay (website),
+    Razorpay (in the app) and Google Play; the money coming in each month now; each month's payments as a CSV file.
+  - **Subscriptions:** paying (by source, how many renew by themselves), in the free trial (and how many set up
+    AutoPay), 3 days to pay, hidden, payment problems; started and stopped paying per month; trials ending this week
+    without AutoPay and payment problems, each linked to the salon.
+  - **People:** accounts and salons now, signups and approvals over the days chosen (and the usual time to approval),
+    people active today, in 7 and in 30 days, Play Store app and website apart.
+  - **Bookings:** made each day, what became of them, busiest hours and areas; or one pincode's.
+  - **Salons:** least used first (when someone of theirs last opened Clozest, bookings over 30 days, setup gaps) or most
+    bookings first.
+  - **App versions:** phones per version per day, Play Store installs apart from test APKs.
+- **Every call says it comes from the admin website** (`X-Clozest-Client: admin-web`), so the team's own use is counted
+  apart from customers' and salons'.
+- **Urgent screen updates** (App releases): **Mark urgent** on a live release, with one line on what it fixes (asked
+  first, "only for serious fixes"): phones that are open get it within about 10 minutes and show "A fix for the app is
+  ready" with Restart. **Not urgent any more** takes it back. A release CI marked from a PR titled `[urgent] …` says
+  "from an [urgent] PR". Every other release still reaches phones silently.
+- Charts are single-colour column charts drawn in SVG (no chart library): hover or Tab to a bar for its value, "Show as
+  a table" for the numbers.
 
 ### Unreleased — App releases
 
