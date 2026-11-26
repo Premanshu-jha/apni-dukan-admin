@@ -1,14 +1,18 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
 import { ApiError } from './errors'
-import type { Lead, LeadAreas, LeadDistrict, LeadDue, LeadEvent, LeadFunnel, LeadIn, LeadScan, LeadUsage } from './types'
+import type { Lead, LeadAreas, LeadDistrict, LeadDue, LeadEvent, LeadFunnel, LeadIn, LeadScan, LeadUsage, PlaceKind } from './types'
 
 const L = '/api/v1/admin/leads'
 
 /** The Leads page's calls (field agents and super admins), as the backend's AdminLeadsController names them. */
 export const leadsApi = {
-  districts: (q: string, signal?: AbortSignal) => api<LeadDistrict[]>('GET', `${L}/districts?${new URLSearchParams({ q })}`, { signal }),
-  areas: (district: string, state: string) => api<LeadAreas>('GET', `${L}/areas?${new URLSearchParams({ district, state })}`),
+  /** Cities, districts, pincodes and post offices (cities=true: this website knows cities). */
+  districts: (q: string, signal?: AbortSignal) => api<LeadDistrict[]>('GET', `${L}/districts?${new URLSearchParams({ q, cities: 'true' })}`, { signal }),
+  /** What people call a place ("Yapral"), looked up on Mapbox: one map search; only when our own list has no match. */
+  places: (q: string, signal?: AbortSignal) => api<LeadDistrict[]>('GET', `${L}/places?${new URLSearchParams({ q })}`, { signal }),
+  areas: (kind: PlaceKind, district: string, state: string) =>
+    api<LeadAreas>('GET', `${L}/areas?${new URLSearchParams({ kind, district, state })}`),
   /** Searches one area live on the map (paid Mapbox requests: only on a press, never prefetched). */
   scan: (pincode: string, signal?: AbortSignal) => api<LeadScan>('POST', `${L}/scan/${encodeURIComponent(pincode)}`, { signal }),
   save: (mapboxId: string, body: LeadIn) => api<Lead>('PUT', `${L}/${encodeURIComponent(mapboxId)}`, { body }),
@@ -16,18 +20,20 @@ export const leadsApi = {
   due: (everyone: boolean) => api<LeadDue[]>('GET', `${L}/due${everyone ? '?everyone=true' : ''}`),
   /** The leads given to you that were tried and haven't signed up (saved details: no map search). */
   mine: (everyone: boolean) => api<LeadDue[]>('GET', `${L}/mine${everyone ? '?everyone=true' : ''}`),
-  funnel: (district: string, state: string) => api<LeadFunnel>('GET', `${L}/funnel?${new URLSearchParams({ district, state })}`),
+  funnel: (kind: PlaceKind, district: string, state: string) =>
+    api<LeadFunnel>('GET', `${L}/funnel?${new URLSearchParams({ kind, district, state })}`),
   usage: () => api<LeadUsage>('GET', `${L}/usage`),
 }
 
 export const leadKeys = {
   all: ['admin', 'leads'] as const,
   districts: (q: string) => ['admin', 'leads', 'districts', q] as const,
-  areas: (district: string, state: string) => ['admin', 'leads', 'areas', district, state] as const,
+  places: (q: string) => ['admin', 'leads', 'places', q] as const,
+  areas: (kind: PlaceKind, district: string, state: string) => ['admin', 'leads', 'areas', kind, district, state] as const,
   history: (id: string) => ['admin', 'leads', 'history', id] as const,
   due: (everyone: boolean) => ['admin', 'leads', 'due', everyone] as const,
   mine: (everyone: boolean) => ['admin', 'leads', 'mine', everyone] as const,
-  funnel: (district: string, state: string) => ['admin', 'leads', 'funnel', district, state] as const,
+  funnel: (kind: PlaceKind, district: string, state: string) => ['admin', 'leads', 'funnel', kind, district, state] as const,
   usage: ['admin', 'leads', 'usage'] as const,
 }
 
@@ -42,8 +48,24 @@ export function useDistricts(q: string) {
   })
 }
 
-export function useAreas(district: string, state: string) {
-  return useQuery({ queryKey: leadKeys.areas(district, state), queryFn: () => leadsApi.areas(district, state), staleTime: 60_000 })
+/**
+ * Mapbox's places for a name our list doesn't have ("Yapral"): only once that search came back empty, from 3 letters,
+ * kept for the session (each look-up is a paid map search).
+ */
+export function usePlaces(q: string, enabled: boolean) {
+  const typed = q.trim()
+  return useQuery({
+    queryKey: leadKeys.places(typed.toLowerCase()),
+    queryFn: ({ signal }) => leadsApi.places(typed, signal),
+    enabled: enabled && typed.length >= 3 && /\p{L}/u.test(typed),
+    staleTime: Infinity,
+    gcTime: 60 * 60_000,
+    retry: false,
+  })
+}
+
+export function useAreas(kind: PlaceKind, district: string, state: string) {
+  return useQuery({ queryKey: leadKeys.areas(kind, district, state), queryFn: () => leadsApi.areas(kind, district, state), staleTime: 60_000 })
 }
 
 export function useLeadHistory(mapboxId: string, enabled: boolean) {
@@ -59,8 +81,8 @@ export function useMine(everyone: boolean, enabled: boolean) {
   return useQuery({ queryKey: leadKeys.mine(everyone), queryFn: () => leadsApi.mine(everyone), enabled, staleTime: 30_000 })
 }
 
-export function useFunnel(district: string, state: string, enabled: boolean) {
-  return useQuery({ queryKey: leadKeys.funnel(district, state), queryFn: () => leadsApi.funnel(district, state), enabled, staleTime: 60_000 })
+export function useFunnel(kind: PlaceKind, district: string, state: string, enabled: boolean) {
+  return useQuery({ queryKey: leadKeys.funnel(kind, district, state), queryFn: () => leadsApi.funnel(kind, district, state), enabled, staleTime: 60_000 })
 }
 
 export function useUsage() {

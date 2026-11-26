@@ -1,8 +1,8 @@
 import { useQueries } from '@tanstack/react-query'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { explain } from '../../api/errors'
-import { leadKeys, leadsApi, useDistricts, useUsage } from '../../api/leads'
-import type { LeadArea } from '../../api/types'
+import { leadKeys, leadsApi, useDistricts, usePlaces, useUsage } from '../../api/leads'
+import type { LeadArea, LeadDistrict } from '../../api/types'
 import { useAdmin } from '../../app/guards'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Spinner } from '../../components/ui'
 import { isSuperAdmin } from '../../lib/roles'
@@ -11,11 +11,10 @@ import { useNow } from '../../lib/useNow'
 import { useDebounced } from '../../lib/useDebounced'
 import { count, matchAreas, shownAreas } from './logic'
 import { Results } from './Results'
-import { useLeads, type District } from './store'
+import { placeKey, useLeads } from './store'
 
-export interface AreaWithDistrict extends LeadArea {
-  district: string
-}
+/** An area with India Post's district it's filed under (a city lists areas of several). */
+export type AreaWithDistrict = LeadArea
 
 /**
  * Pick one or more cities or districts, narrow the areas with the area search (chips; clearing it brings every area
@@ -31,12 +30,14 @@ export function AreasTab() {
   }, [hydrate, userId])
   const areaQueries = useQueries({
     queries: districts.map((d) => ({
-      queryKey: leadKeys.areas(d.district, d.state),
-      queryFn: () => leadsApi.areas(d.district, d.state),
+      queryKey: leadKeys.areas(d.kind, d.district, d.state),
+      queryFn: () => leadsApi.areas(d.kind, d.district, d.state),
       staleTime: 60_000,
     })),
   })
-  const areas: AreaWithDistrict[] = areaQueries.flatMap((q) => (q.data ? q.data.areas.map((a) => ({ ...a, district: q.data.district })) : []))
+  // A city and one of its districts may both be picked: each area once
+  const seen = new Set<string>()
+  const areas: AreaWithDistrict[] = areaQueries.flatMap((q) => q.data?.areas ?? []).filter((a) => !seen.has(a.pincode) && !!seen.add(a.pincode))
   const loading = areaQueries.some((q) => q.isPending)
   const failed = areaQueries.find((q) => q.isError)
   const knowAreas = useLeads((s) => s.knowAreas)
@@ -67,27 +68,170 @@ export function AreasTab() {
   )
 }
 
-/** A search box with a dropdown of districts; the picked ones are chips with ×. */
-function DistrictPicker() {
-  const { districts, addDistrict, removeDistrict, setAreaFilter, select } = useLeads()
-  const [typed, setTyped] = useState('')
-  const q = useDebounced(typed, 250)
-  const found = useDistricts(q)
-  const listId = useId()
-  const open = typed.trim().length >= 2
-  const pick = (d: District & { matched?: string | null }) => {
-    addDistrict({ district: d.district, state: d.state })
-    setTyped('')
-    // Found by an area ("Kukatpally (500072)"): that area goes straight into the area search, ticked
-    const pin = d.matched?.match(/\((\d{6})\)$/)?.[1]
-    if (pin) {
+/**
+ * Picks a place to view: adds the city or district (if not picked yet) and, when an area matched, puts that area in
+ * the area search, ticked. Nothing is created: every area is already in the list.
+ */
+export function usePickPlace() {
+  const { addDistrict, removeDistrict, setAreaFilter, select, knowAreas } = useLeads()
+  return (d: LeadDistrict) => {
+    const place = { kind: d.kind, district: d.district, state: d.state }
+    // A city covers its districts: their chips go (their areas are the city's), so nothing is listed twice
+    if (d.kind === 'CITY') {
+      for (const x of useLeads.getState().districts) {
+        if (x.kind === 'DISTRICT' && placeKey(x.state) === placeKey(d.state) && d.districts.some((n) => placeKey(n) === placeKey(x.district))) {
+          // Its areas are the city's now: they keep their ticks and chips
+          const pins = Object.entries(useLeads.getState().areaDistricts)
+            .filter(([, owners]) => owners.some((o) => o.kind === x.kind && placeKey(o.district) === placeKey(x.district) && placeKey(o.state) === placeKey(x.state)))
+            .map(([pin]) => pin)
+          knowAreas(place, pins)
+          removeDistrict(x)
+        }
+      }
+    }
+    addDistrict(place)
+    if (d.pincode) {
+      // Known as this place's at once: removing the place before its areas arrive also drops this tick
+      knowAreas(place, [d.pincode])
       const now = useLeads.getState().areaFilter
-      if (!now.includes(pin)) setAreaFilter([...now, pin])
-      select([pin], true)
+      if (!now.includes(d.pincode)) setAreaFilter([...now, d.pincode])
+      select([d.pincode], true)
     }
   }
-  const has = (name: string) => districts.some((x) => x.district === name && x.state === 'Telangana')
-  const greaterHyderabad = has('Hyderabad') ? ['Medchal Malkajgiri', 'Ranga Reddy'].filter((n) => !has(n)) : []
+}
+
+const NONE: LeadDistrict[] = []
+
+/** "City · Hyderabad, Medchal Malkajgiri, Ranga Reddy · 134 areas" / "District · Saharsa, Bihar · 13 areas". */
+function placeLine(d: LeadDistrict, list: LeadDistrict[]) {
+  // A result for one area opens its place with that area ticked: not a search of all its areas
+  if (d.pincode) return `Opens ${d.district}${d.kind === 'CITY' ? ' (city)' : ''} with this area ticked`
+  if (d.kind === 'CITY') return `City · ${d.districts.join(', ')} · ${count(d.pincodes)} areas`
+  // "Hyderabad" the district next to Hyderabad the city: say it's only part of it
+  const alsoCity = list.some((x) => x.kind === 'CITY' && x.district === d.district && x.state === d.state)
+  return `${alsoCity ? 'District only' : 'District'} · ${d.state} · ${count(d.pincodes)} areas`
+}
+
+/**
+ * The places matching what was typed: our own list first (cities, districts, pincodes, post offices: free); when it
+ * has nothing and a name was typed, Mapbox's places ("Yapral": one map search, said so).
+ */
+function PlaceOptions({
+  typed,
+  q,
+  onPick,
+  empty,
+  onOptions,
+}: {
+  typed: string
+  q: string
+  onPick: (d: LeadDistrict) => void
+  empty: string
+  /** The options shown now (for Enter to pick the first). */
+  onOptions?: (list: LeadDistrict[]) => void
+}) {
+  const found = useDistricts(q)
+  // A map look-up is paid: only once typing has paused a while (not one per letter of "yapral")
+  const slowQ = useDebounced(q, 900)
+  const settled = q === typed.trim()
+  const nothingOurs = settled && found.isSuccess && found.data.length === 0
+  // Asked for by a tap when our list had something (it may be a look-alike elsewhere: Madhapur the village)
+  const [asked, setAsked] = useState<string | null>(null)
+  const wantMap = (nothingOurs && slowQ === q) || asked === q
+  const onMap = usePlaces(asked === q ? q : slowQ, wantMap)
+  const list = useMemo(
+    () => (asked === q && onMap.data ? onMap.data : found.data?.length ? found.data : (onMap.data ?? NONE)),
+    [asked, q, found.data, onMap.data],
+  )
+  const fromMap = list === onMap.data && !!onMap.data
+  useEffect(() => {
+    onOptions?.(settled ? list : NONE)
+    return () => onOptions?.(NONE) // closed: Enter has nothing to pick
+  }, [list, settled, onOptions])
+  if (q.length < 2) return <li role="presentation" className="p-2 text-sm text-muted">Type 2 or more letters or digits.</li>
+  if (!settled || found.isPending) {
+    return (
+      <li role="presentation" className="p-2">
+        <Spinner small label="Searching…" />
+      </li>
+    )
+  }
+  if (found.isError)
+    return (
+      <li role="presentation" className="p-2 text-sm text-bad">
+        {explain(found.error)}
+      </li>
+    )
+  if (!list.length) {
+    if (nothingOurs && (onMap.isFetching || slowQ !== q)) {
+      return (
+        <li role="presentation" className="p-2">
+          <Spinner small label="Looking it up on the map…" />
+        </li>
+      )
+    }
+    if (onMap.isError)
+      return (
+        <li role="presentation" className="p-2 text-sm text-bad">
+          {explain(onMap.error)}
+        </li>
+      )
+    return (
+      <li role="presentation" className="p-2 text-sm text-muted">
+        {empty}
+      </li>
+    )
+  }
+  return (
+    <>
+      {fromMap && (
+        <li role="presentation" className="px-2 pt-1 text-xs text-muted">
+          Found on the map (used 1 map search):
+        </li>
+      )}
+      {list.map((d) => (
+        <li key={`${d.kind}|${d.district}|${d.state}|${d.pincode ?? ''}`} role="option" aria-selected={false}>
+          <button
+            type="button"
+            onClick={() => onPick(d)}
+            className="flex min-h-12 w-full flex-col items-start justify-center rounded-xl px-3 py-1 text-left hover:bg-raised"
+          >
+            <span className="font-semibold [overflow-wrap:anywhere]">{d.matched ? `${d.matched} · ${d.district}` : `${d.district}, ${d.state}`}</span>
+            <span className="text-sm text-muted [overflow-wrap:anywhere]">{placeLine(d, list)}</span>
+          </button>
+        </li>
+      ))}
+      {!fromMap && /\p{L}/u.test(q) && q.length >= 3 && (
+        <li role="presentation" className="p-1">
+          <button
+            type="button"
+            onClick={() => setAsked(q)}
+            disabled={asked === q && onMap.isFetching}
+            className="min-h-11 w-full rounded-xl px-2 text-left text-sm font-semibold text-link underline"
+          >
+            {asked === q && onMap.isFetching ? 'Looking it up on the map…' : `Not the one? Look up "${q}" on the map (uses 1 map search)`}
+          </button>
+          {asked === q && onMap.isSuccess && onMap.data.length === 0 && <p className="px-2 text-sm text-muted">The map doesn't know "{q}" either.</p>}
+          {asked === q && onMap.isError && <p className="px-2 text-sm text-bad">{explain(onMap.error)}</p>}
+        </li>
+      )}
+    </>
+  )
+}
+
+/** A search box for any city, district, pincode, post office or place in India; the picked ones are chips with ×. */
+function DistrictPicker() {
+  const { districts, removeDistrict } = useLeads()
+  const pickPlace = usePickPlace()
+  const [typed, setTyped] = useState('')
+  const q = useDebounced(typed.trim(), 300)
+  const [options, setOptions] = useState<LeadDistrict[]>([])
+  const listId = useId()
+  const open = typed.trim().length >= 2
+  const pick = (d: LeadDistrict) => {
+    pickPlace(d)
+    setTyped('')
+  }
   return (
     <Card className="flex flex-col gap-3">
       <label htmlFor="district-search" className="text-sm font-medium text-muted">
@@ -100,53 +244,35 @@ function DistrictPicker() {
         aria-controls={listId}
         aria-autocomplete="list"
         autoComplete="off"
-        placeholder="Type a city, area or pincode"
+        placeholder="City, area, pincode, e.g. Hyderabad, Yapral, 500087"
         value={typed}
         onChange={(e) => setTyped(e.target.value)}
         onKeyDown={(e) => {
           // Only what the list shows for what is typed now (not an older answer still on screen)
-          if (e.key === 'Enter' && q === typed && !found.isFetching && found.data?.[0]) pick(found.data[0])
+          // Only what the list shows for what is typed now (ours or the map's)
+          if (e.key === 'Enter' && open && q === typed.trim() && options[0]) pick(options[0])
           if (e.key === 'Escape') setTyped('')
         }}
         className="min-h-12 rounded-xl border border-line bg-surface px-4 text-base text-ink placeholder:text-muted/60 focus:border-brand focus:outline-none"
       />
       {open && (
-        <ul id={listId} role="listbox" aria-label="Matching districts" className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-          {found.isPending || q !== typed ? (
-            <li className="p-2">
-              <Spinner small label="Searching…" />
-            </li>
-          ) : found.isError ? (
-            <li className="p-2 text-sm text-bad">{explain(found.error)}</li>
-          ) : found.data.length === 0 ? (
-            <li className="p-2 text-sm text-muted">No city, district, area or pincode matches "{typed.trim()}". Check the spelling.</li>
-          ) : (
-            found.data.map((d) => (
-              <li key={`${d.district}|${d.state}`} role="option" aria-selected={false}>
-                <button
-                  type="button"
-                  onClick={() => pick(d)}
-                  className="flex min-h-12 w-full flex-col items-start justify-center rounded-xl px-3 text-left hover:bg-raised"
-                >
-                  <span className="font-semibold">
-                    {d.district}, {d.state}
-                  </span>
-                  <span className="text-sm text-muted">
-                    {d.matched ? `Has ${d.matched} · ` : ''}
-                    {count(d.pincodes)} areas
-                  </span>
-                </button>
-              </li>
-            ))
-          )}
+        <ul id={listId} role="listbox" aria-label="Matching places" className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+          <PlaceOptions
+            typed={typed}
+            q={q}
+            onPick={pick}
+            onOptions={setOptions}
+            empty={`Nothing in India matches "${typed.trim()}". Check the spelling, or try the pincode.`}
+          />
         </ul>
       )}
       {districts.length > 0 && (
-        <ul className="flex flex-wrap gap-2" aria-label="Districts picked">
+        <ul className="flex flex-wrap gap-2" aria-label="Places picked">
           {districts.map((d) => (
-            <li key={`${d.district}|${d.state}`}>
+            <li key={`${d.kind}|${d.district}|${d.state}`}>
               <span className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-brand bg-brand/15 pl-3 text-sm font-semibold">
-                {d.district}, {d.state}
+                {d.district}
+                {d.kind === 'CITY' ? ' (city)' : ''}, {d.state}
                 <button
                   type="button"
                   aria-label={`Remove ${d.district}`}
@@ -160,18 +286,6 @@ function DistrictPicker() {
           ))}
         </ul>
       )}
-      {greaterHyderabad.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-muted">Greater Hyderabad also spans these districts:</p>
-          <div className="flex flex-wrap gap-2">
-            {greaterHyderabad.map((n) => (
-              <Button key={n} variant="secondary" className="min-h-11" onClick={() => addDistrict({ district: n, state: 'Telangana' })}>
-                + {n}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
     </Card>
   )
 }
@@ -184,6 +298,9 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
   const usage = useUsage()
   const liveUsage = useLeads((s) => s.usage) ?? usage.data ?? null
   const [typed, setTyped] = useState('')
+  const elsewhereQ = useDebounced(typed.trim(), 300)
+  const pickPlace = usePickPlace()
+  const multiDistrict = new Set(areas.map((a) => a.district)).size > 1
   const [confirmBig, setConfirmBig] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const [shownNote, setShownNote] = useState<string | null>(null)
@@ -248,7 +365,7 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
       <input
         id="area-search"
         role="combobox"
-        aria-expanded={suggestions.length > 0}
+        aria-expanded={typed.trim().length > 0}
         aria-controls={listId}
         autoComplete="off"
         placeholder="Area name or pincode, e.g. Kukatpally"
@@ -262,14 +379,33 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
       />
       {typed.trim() && (
         <ul id={listId} role="listbox" aria-label="Matching areas" className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-          {suggestions.length === 0 ? (
-            <li className="p-2 text-sm text-muted">No area matches "{typed.trim()}" in the districts picked.</li>
+          {suggestions.length === 0 && matchAreas(areas, typed, []).length > 0 ? (
+            <li role="presentation" className="p-2 text-sm text-muted">
+              Already in the area search above.
+            </li>
+          ) : suggestions.length === 0 ? (
+            // Not in the places picked: anywhere in India (tapping one shows its city or district, that area ticked)
+            <>
+              <li role="presentation" className="px-2 pt-1 text-xs text-muted">
+                Not in the places picked. Elsewhere in India:
+              </li>
+              <PlaceOptions
+                typed={typed}
+                q={elsewhereQ}
+                onPick={(d) => {
+                  pickPlace(d)
+                  setTyped('')
+                }}
+                empty={`No area in India matches "${typed.trim()}". Check the spelling, or try the pincode.`}
+              />
+            </>
           ) : (
             suggestions.map((a) => (
               <li key={a.pincode} role="option" aria-selected={false}>
                 <button type="button" onClick={() => add(a.pincode)} className="flex min-h-12 w-full items-center rounded-xl px-3 text-left hover:bg-raised">
                   <span className="min-w-0 [overflow-wrap:anywhere]">
                     <span className="font-semibold">{a.pincode}</span> {a.places}
+                    {multiDistrict && <span className="text-sm text-muted"> · {a.district}</span>}
                   </span>
                 </button>
               </li>
@@ -324,6 +460,9 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
         )}
       </div>
 
+      {shown.length > 30 && !areaFilter.length && (
+        <p className="text-sm text-muted">{count(shown.length)} areas. Type an area name or pincode in Search areas to find yours quickly.</p>
+      )}
       <ul className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto" aria-label="Areas">
         {shown.map((a) => {
           const scanned = scans[a.pincode]

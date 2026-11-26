@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { loadSaved, MAX_AGE_MS, saveScan } from './savedScans'
 import { useLeads } from './store'
 
-const medchal = { district: 'Medchal Malkajgiri', state: 'Telangana' }
-const hyd = { district: 'Hyderabad', state: 'Telangana' }
+const medchal = { kind: 'DISTRICT' as const, district: 'Medchal Malkajgiri', state: 'Telangana' }
+const hyd = { kind: 'DISTRICT' as const, district: 'Hyderabad', state: 'Telangana' }
 
 describe('leads store', () => {
   beforeEach(() => useLeads.getState().reset())
@@ -20,6 +20,27 @@ describe('leads store', () => {
     expect(useLeads.getState().districts).toEqual([hyd])
     expect(useLeads.getState().selected).toEqual(['500073'])
     expect(useLeads.getState().areaFilter).toEqual(['500073'])
+  })
+
+  it('removing one place keeps the areas another picked place still lists', () => {
+    const city = { kind: 'CITY' as const, district: 'Hyderabad', state: 'Telangana' }
+    const s = useLeads.getState()
+    s.addDistrict(city)
+    s.addDistrict(medchal)
+    s.knowAreas(city, ['500072', '500073'])
+    s.knowAreas(medchal, ['500072'])
+    s.select(['500072', '500073'], true)
+    useLeads.getState().removeDistrict(medchal)
+    expect(useLeads.getState().selected).toEqual(['500072', '500073'])
+    useLeads.getState().removeDistrict(city)
+    expect(useLeads.getState().selected).toEqual([])
+  })
+
+  it('a place saved before with other capitals is the same place ("Y.s.r." is "Y.S.R." now)', () => {
+    const s = useLeads.getState()
+    s.addDistrict({ kind: 'DISTRICT', district: 'Y.s.r.', state: 'Andhra Pradesh' })
+    s.addDistrict({ kind: 'DISTRICT', district: 'Y.S.R.', state: 'Andhra Pradesh' })
+    expect(useLeads.getState().districts).toHaveLength(1)
   })
 
   it('sign-out forgets the districts, ticks and results (a shared phone shows the next person none)', () => {

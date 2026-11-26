@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { leadsApi, scanProblem } from '../../api/leads'
-import type { Lead, LeadScan, LeadUsage } from '../../api/types'
+import type { Lead, LeadScan, LeadUsage, PlaceKind } from '../../api/types'
 import { storage } from '../../lib/storage'
 import { NO_FILTERS, type Filters } from './logic'
 import { forgetAll, forgetScans, loadSaved, MAX_AGE_MS, saveScan } from './savedScans'
@@ -10,7 +10,10 @@ const DISTRICTS_KEY = 'ada.leads.districts'
 /** Areas searched at the same time: enough to be quick, few enough not to crowd the server (it allows 4 per server). */
 export const SCANS_AT_ONCE = 2
 
+/** A picked city or district (remembered on this device). */
 export interface District {
+  /** CITY: all areas of its districts; DISTRICT (also what was saved before cities existed). */
+  kind: PlaceKind
   district: string
   state: string
 }
@@ -52,7 +55,8 @@ interface LeadsState {
   addDistrict: (d: District) => void
   removeDistrict: (d: District) => void
   /** Which district each listed area belongs to (so removing a district drops its areas). */
-  areaDistricts: Record<string, District>
+  /** The picked places that list each area (a city and one of its districts can both list it). */
+  areaDistricts: Record<string, District[]>
   knowAreas: (d: District, pincodes: string[]) => void
   setAreaFilter: (pincodes: string[]) => void
   toggle: (pincode: string) => void
@@ -82,13 +86,20 @@ export const BUSY_TRIES = 5
 
 function savedDistricts(): District[] {
   const saved = storage.getJson<District[]>(DISTRICTS_KEY)
-  return Array.isArray(saved) ? saved.filter((d) => d && typeof d.district === 'string' && typeof d.state === 'string').slice(0, 10) : []
+  return Array.isArray(saved)
+    ? saved
+        .filter((d) => d && typeof d.district === 'string' && typeof d.state === 'string')
+        .map((d) => ({ kind: d.kind === 'CITY' ? ('CITY' as const) : ('DISTRICT' as const), district: d.district, state: d.state }))
+        .slice(0, 10)
+    : []
 }
 
 /** Said when a search was cut short by the month's cap (the area's answer is shown; the rest wait). */
 export const CAP_REACHED = "This month's map searches are used up, so the search stopped. Ask a super admin to raise the monthly limit."
 
-const same = (a: District, b: District) => a.district === b.district && a.state === b.state
+/** Names compared as the backend does (case and dots don't matter: "Y.s.r." saved before is "Y.S.R." now). */
+export const placeKey = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+const same = (a: District, b: District) => a.kind === b.kind && placeKey(a.district) === placeKey(b.district) && placeKey(a.state) === placeKey(b.state)
 
 let controller: AbortController | null = null
 /** Times each area was sent back by a busy server in this search. */
@@ -127,8 +138,9 @@ export const useLeads = create<LeadsState>((set, get) => {
       const now = get().progress
       if (now) {
         // Not put back if its district was removed while it was being searched
-        const d = get().areaDistricts[pincode]
-        const stillPicked = !d || get().districts.some((x) => same(x, d))
+        const owners = get().areaDistricts[pincode]
+        // Unknown (picked before its areas arrived): still picked; known but no picked place lists it: removed
+        const stillPicked = owners === undefined || owners.some((o) => get().districts.some((x) => same(x, o)))
         const requeue = retryAfter !== undefined && !signal.aborted && stillPicked
         set({
           progress: {
@@ -182,9 +194,13 @@ export const useLeads = create<LeadsState>((set, get) => {
     removeDistrict: (d) => {
       const districts = get().districts.filter((x) => !same(x, d))
       storage.setJson(DISTRICTS_KEY, districts)
-      // Its areas go too: not ticked, not in the area search, not waiting to be searched
-      const gone = new Set(Object.entries(get().areaDistricts).filter(([, x]) => same(x, d)).map(([pin]) => pin))
+      // Its areas go too (not ticked, not in the area search, not waiting to be searched), unless another picked
+      // place still lists them
+      const owners: Record<string, District[]> = {}
+      for (const [pin, list] of Object.entries(get().areaDistricts)) owners[pin] = list.filter((x) => !same(x, d))
+      const gone = new Set(Object.keys(owners).filter((pin) => owners[pin].length === 0 && get().areaDistricts[pin].length > 0))
       set((s) => ({
+        areaDistricts: owners,
         districts,
         selected: s.selected.filter((x) => !gone.has(x)),
         areaFilter: s.areaFilter.filter((x) => !gone.has(x)),
@@ -195,7 +211,10 @@ export const useLeads = create<LeadsState>((set, get) => {
     knowAreas: (d, pincodes) =>
       set((s) => {
         const areaDistricts = { ...s.areaDistricts }
-        for (const pin of pincodes) areaDistricts[pin] = d
+        for (const pin of pincodes) {
+          const had = areaDistricts[pin] ?? []
+          if (!had.some((x) => same(x, d))) areaDistricts[pin] = [...had, d]
+        }
         return { areaDistricts }
       }),
     setAreaFilter: (areaFilter) => set({ areaFilter }),

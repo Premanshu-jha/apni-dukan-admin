@@ -272,10 +272,17 @@ export class MockApi {
           { pincode: '500072', places: 'Kukatpally, Vivekanandanagar Colony' },
           { pincode: '500085', places: 'Jawaharlal Nehru Technological University, KPHB Colony' },
           { pincode: '500090', places: 'Nizampet, Bachupally' },
+          { pincode: '500087', places: 'JJ Nagar Colony, Jawahar Nagar' },
         ],
       },
       { district: 'Hyderabad', state: 'Telangana', areas: [{ pincode: '500073', places: 'Srinagar Colony' }] },
+      { district: 'Ranga Reddy', state: 'Telangana', areas: [{ pincode: '500032', places: 'Gachibowli' }] },
+      { district: 'Saharsa', state: 'Bihar', areas: [{ pincode: '852201', places: 'Saharsa, Saharsa Bazar' }] },
     ],
+    /** Cities (india_cities): all areas of their districts, the city's own first. */
+    cities: [{ name: 'Hyderabad', state: 'Telangana', otherNames: ['Secunderabad'], districts: ['Hyderabad', 'Medchal Malkajgiri', 'Ranga Reddy'] }],
+    /** What Mapbox answers a place look-up with (name → pincode): GET /places. */
+    onMapPlaces: { yapral: [{ name: 'Yapral', pincode: '500087' }] } as Record<string, { name: string; pincode: string }[]>,
     /** Pincodes the signed-in field agent covers. */
     mine: ['500072'],
     onClozest: {} as Record<string, number>,
@@ -1496,7 +1503,29 @@ export class MockApi {
       const L = this.leads
       const name = (id: string | null | undefined) => (id ? ((this.team.find((m) => m.userId === id)?.name as string | undefined) ?? (id === this.user.id ? this.user.name : null)) : null)
       const person = (id: string | null | undefined) => (id ? { id, name: name(id) } : null)
-      const district = L.districts.find((d) => d.district === url.searchParams.get('district') && d.state === url.searchParams.get('state'))
+      // A city or district as LeadService.place: kind CITY gets all areas of its districts (its own first)
+      type Place = { kind: 'CITY' | 'DISTRICT'; district: string; state: string; districts: string[]; areas: { pincode: string; places: string; district: string }[] }
+      const districtPlace = (d: (typeof L.districts)[number]): Place => ({ kind: 'DISTRICT', district: d.district, state: d.state, districts: [d.district], areas: d.areas.map((a) => ({ ...a, district: d.district })) })
+      const cityPlace = (c: (typeof L.cities)[number]): Place => ({
+        kind: 'CITY', district: c.name, state: c.state, districts: c.districts,
+        areas: c.districts.flatMap((n) => L.districts.find((d) => d.district === n && d.state === c.state)?.areas.map((a) => ({ ...a, district: n })) ?? []),
+      })
+      const placeOf = (pin: string): Place | undefined => {
+        const d = L.districts.find((x) => x.areas.some((a) => a.pincode === pin))
+        if (!d) return undefined
+        const c = L.cities.find((x) => x.state === d.state && x.districts.includes(d.district))
+        return c ? cityPlace(c) : districtPlace(d)
+      }
+      const hitOf = (pl: Place, matched: string | null, pincode: string | null): Json => ({
+        kind: pl.kind, district: pl.district, state: pl.state, pincodes: pl.areas.length, districts: pl.districts, matched, pincode,
+      })
+      const kind = url.searchParams.get('kind') || 'DISTRICT'
+      const wanted = url.searchParams.get('district')
+      const wantedState = url.searchParams.get('state')
+      const district: Place | undefined =
+        kind === 'CITY'
+          ? L.cities.filter((c) => c.name === wanted && c.state === wantedState).map(cityPlace)[0]
+          : L.districts.filter((d) => d.district === wanted && d.state === wantedState).map(districtPlace)[0]
       const placesOf = (pin: string) => L.districts.flatMap((d) => d.areas).find((a) => a.pincode === pin)?.places
       const leadView = (l: Json) => ({
         status: l.status, note: l.note, assignedTo: person(l.assignedTo as string | null), followUpOn: l.followUpOn ?? null,
@@ -1509,17 +1538,69 @@ export class MockApi {
         const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
         if (q.length > 60) return invalid({ q: 'not valid' })
         if (q.length < 2) return ok(200, [])
-        const hits = L.districts.flatMap((d): Json[] => {
-          if (d.district.toLowerCase().includes(q) || d.state.toLowerCase().startsWith(q)) return [{ district: d.district, state: d.state, pincodes: d.areas.length, matched: null }]
-          const a = d.areas.find((x) => x.pincode.startsWith(q) || x.places.toLowerCase().includes(q))
-          return a ? [{ district: d.district, state: d.state, pincodes: d.areas.length, matched: /^\d+$/.test(q) ? a.pincode : `${a.places.split(', ').find((x) => x.toLowerCase().includes(q)) ?? a.places} (${a.pincode})` }] : []
-        })
-        return ok(200, hits)
+        // As PincodeDirectory.search: cities (name or another name), districts, then areas (pincode or post office)
+        const digits = /^\d+$/.test(q)
+        const ranked: { rank: number; hit: Json }[] = []
+        // Without cities=true (an admin website from before cities): districts only
+        const withCities = url.searchParams.get('cities') === 'true'
+        if (!digits && withCities) {
+          for (const c of L.cities) {
+            const other = c.otherNames.find((n) => n.toLowerCase().startsWith(q) || n.toLowerCase().includes(` ${q}`))
+            const word = (n: string) => (n.toLowerCase().startsWith(q) ? 0 : n.toLowerCase().includes(` ${q}`) ? 1 : -1)
+            const otherRank = other ? word(other) : -1
+            const rank = word(c.name) >= 0 ? word(c.name) : otherRank
+            if (rank >= 0) ranked.push({ rank, hit: hitOf(cityPlace(c), word(c.name) >= 0 ? null : other!, null) })
+          }
+        }
+        if (!digits) {
+          for (const d of L.districts) {
+            const n = d.district.toLowerCase()
+            const rank = n.startsWith(q) ? 0 : n.includes(` ${q}`) ? 1 : d.state.toLowerCase().startsWith(q) ? 2 : -1
+            if (rank >= 0) ranked.push({ rank, hit: hitOf(districtPlace(d), null, null) })
+          }
+        }
+        for (const a of L.districts.flatMap((d) => d.areas).sort((x, y) => x.pincode.localeCompare(y.pincode))) {
+          // A post office whose name has a word starting with it ("alwal" isn't Palwal)
+          const names = a.places.toLowerCase()
+          if (!(digits ? a.pincode.startsWith(q) : names.startsWith(q) || names.includes(` ${q}`))) continue
+          const where = withCities ? placeOf(a.pincode)! : districtPlace(L.districts.find((d) => d.areas.some((x) => x.pincode === a.pincode))!)
+          const two = a.places.split(', ').slice(0, 2).join(', ')
+          const matched = digits ? `${a.pincode} · ${two}` : `${a.places.split(', ').find((x) => x.toLowerCase().includes(q)) ?? a.places} (${a.pincode})`
+          // Areas in a city first, then elsewhere
+          ranked.push({ rank: where.kind === 'CITY' ? 3 : 4, hit: hitOf(where, matched, a.pincode) })
+        }
+        // As the backend: rank, then bigger places first (area hits count as size 0), then the place's name
+        const size = (x: { rank: number; hit: Json }) => (x.hit.pincode ? 0 : (x.hit.pincodes as number))
+        return ok(
+          200,
+          ranked
+            .sort((x, y) => x.rank - y.rank || size(y) - size(x) || (x.hit.district as string).localeCompare(y.hit.district as string) || String(x.hit.pincode ?? '').localeCompare(String(y.hit.pincode ?? '')))
+            .slice(0, 15)
+            .map((x) => x.hit),
+        )
+      }
+      if (p === '/admin/leads/places' && method === 'GET') {
+        // As LeadService.places: a name our list lacks, looked up on Mapbox (one map search)
+        const q = (url.searchParams.get('q') ?? '').trim()
+        if (q.length < 3 || q.length > 60 || !/\p{L}/u.test(q)) return invalid({ q: 'not valid' })
+        if (L.scanError) return ok(L.scanError.status, { code: L.scanError.code, message: L.scanError.message, details: {} })
+        L.usage.used += 1
+        const seen = new Set<string>()
+        const out: Json[] = []
+        for (const m of L.onMapPlaces[q.toLowerCase()] ?? []) {
+          const where = placeOf(m.pincode)
+          if (where && !seen.has(m.pincode)) {
+            seen.add(m.pincode)
+            out.push(hitOf(where, `${m.name} (${m.pincode})`, m.pincode))
+          }
+        }
+        return ok(200, out)
       }
       if (p === '/admin/leads/areas' && method === 'GET') {
-        if (!district) return fail(404, 'DISTRICT_NOT_FOUND', "That district isn't in the list.")
+        if (!['CITY', 'DISTRICT'].includes(kind)) return invalid({ kind: 'not valid' })
+        if (!district) return fail(404, 'DISTRICT_NOT_FOUND', "That city or district isn't in the list.")
         return ok(200, {
-          district: district.district, state: district.state,
+          kind: district.kind, district: district.district, state: district.state, districts: district.districts,
           areas: district.areas.map((a) => {
             const saved = [...L.saved.values()].filter((l) => l.pincode === a.pincode)
             return {
@@ -1583,7 +1664,8 @@ export class MockApi {
       }
       if (p === '/admin/leads/funnel' && method === 'GET') {
         if (!isSuper) return superOnly()
-        if (!district) return fail(404, 'DISTRICT_NOT_FOUND', "That district isn't in the list.")
+        if (!['CITY', 'DISTRICT'].includes(kind)) return invalid({ kind: 'not valid' })
+        if (!district) return fail(404, 'DISTRICT_NOT_FOUND', "That city or district isn't in the list.")
         const pins = new Set(district.areas.map((a) => a.pincode))
         const rows = [...L.saved.values()].filter((l) => pins.has(l.pincode as string))
         const areas = [...new Set(rows.map((l) => l.pincode as string))].sort().map((pin) => {
@@ -1595,7 +1677,7 @@ export class MockApi {
           const r = rows.filter((l) => l.assignedTo === id)
           return { person: person(id), assigned: r.length, contacted: r.filter((l) => l.status !== 'NEW' && l.status !== 'NO_ANSWER').length, interested: r.filter((l) => l.status === 'INTERESTED').length, signedUp: rows.filter((l) => l.creditedTo === id && l.signedUpAt).length }
         })
-        return ok(200, { district: district.district, state: district.state, areas, people })
+        return ok(200, { kind: district.kind, district: district.district, state: district.state, areas, people })
       }
       const historyPath = p.match(/^\/admin\/leads\/(.+)\/history$/)
       if (historyPath && method === 'GET') return ok(200, L.history.get(decodeURIComponent(historyPath[1])) ?? [])

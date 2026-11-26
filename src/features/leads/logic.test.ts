@@ -89,8 +89,8 @@ describe('numbers', () => {
 
 describe('area search', () => {
   const areas: LeadArea[] = [
-    { pincode: '500072', places: 'Kukatpally, Vivekanandanagar Colony', mine: true, onMap: true, contacted: 0, interested: 0, signedUp: 0, onClozest: 0 },
-    { pincode: '500085', places: 'JNTU, KPHB Colony', mine: false, onMap: true, contacted: 0, interested: 0, signedUp: 0, onClozest: 0 },
+    { pincode: '500072', places: 'Kukatpally, Vivekanandanagar Colony', district: 'Medchal Malkajgiri', mine: true, onMap: true, contacted: 0, interested: 0, signedUp: 0, onClozest: 0 },
+    { pincode: '500085', places: 'JNTU, KPHB Colony', district: 'Medchal Malkajgiri', mine: false, onMap: true, contacted: 0, interested: 0, signedUp: 0, onClozest: 0 },
   ]
   it('matches a pincode by its start and a place by any part, leaving out those chosen', () => {
     expect(matchAreas(areas, '5000', []).map((a) => a.pincode)).toEqual(['500072', '500085'])
