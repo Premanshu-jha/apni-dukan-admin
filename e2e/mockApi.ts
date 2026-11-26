@@ -299,6 +299,14 @@ export class MockApi {
     partial: new Set<string>(),
     /** Requests one scan counts. */
     requestsPerScan: 37,
+    /**
+     * When something last changed in an area outside the team's leads (a Clozest salon registered or changed): POST
+     * /changes lists the area when this or a saved lead there is newer than its `since`. Tests set it with the change.
+     */
+    changedAt: {} as Record<string, string>,
+    /** Every check for changes / refresh answers this (429 TOO_MANY_REQUESTS…), until cleared. */
+    checkError: null as null | { status: number; code: string; message: string },
+    refreshError: null as null | { status: number; code: string; message: string },
   }
   /**
    * Analytics (AnalyticsService/AdminAnalyticsController): the answers per section, in the backend's shapes. Tests
@@ -1633,6 +1641,60 @@ export class MockApi {
           pincode: pin, places: placesOf(pin), district: L.districts.find((d) => d.areas.some((a) => a.pincode === pin))!.district, state: 'Telangana',
           shops: [...found, ...extra], clozestOnly: (L.clozestOnly[pin] ?? []).map((s) => ({ ...s, shopId: isSuper ? s.shopId : null })),
           requests: L.requestsPerScan, partial: L.partial.has(pin), capReached: false, usage: { ...L.usage },
+          asOf: new Date(Date.now() - 30_000).toISOString(),
+        })
+      }
+      // As LeadService.changes: which areas changed after their `since` (a saved lead's updatedAt, or L.changedAt)
+      if (p === '/admin/leads/changes' && method === 'POST') {
+        const areas = (body as Json | null)?.areas as Json[] | undefined
+        if (!Array.isArray(areas) || areas.length > 300) return invalid({ areas: 'not valid' })
+        if (areas.some((a) => !a || typeof a.pincode !== 'string' || !(a.pincode as string).trim() || (a.pincode as string).length > 6 || typeof a.since !== 'string' || Number.isNaN(Date.parse(a.since as string)))) {
+          return invalid({ areas: 'not valid' })
+        }
+        const asOf = new Date(Date.now() - 30_000).toISOString()
+        // A pincode no longer in the list is skipped, as the backend does
+        const known = areas.filter((a) => placesOf(a.pincode as string))
+        if (!known.length) return ok(200, { asOf, areas: [] })
+        if (L.checkError) return ok(L.checkError.status, { code: L.checkError.code, message: L.checkError.message, details: {} })
+        const changed = known.flatMap((a) => {
+          const pin = a.pincode as string
+          const times = [L.changedAt[pin], ...[...L.saved.values()].filter((l) => l.pincode === pin).map((l) => l.updatedAt as string)]
+            .filter((t): t is string => !!t && Date.parse(t) > Date.parse(a.since as string))
+          return times.length ? [{ pincode: pin, changedAt: times.sort().at(-1)! }] : []
+        })
+        return ok(200, { asOf, areas: changed })
+      }
+      // As LeadService.refresh (the fake doesn't match names or phones: tests put the salon on the business in L.found;
+      // the real rules for what may be sent are checked): each business sent with its lead and Clozest salon now, contacted leads
+      // not sent, and the salons no business matched
+      const refreshPath = p.match(/^\/admin\/leads\/refresh\/(.+)$/)
+      if (refreshPath && method === 'POST') {
+        const pin = decodeURIComponent(refreshPath[1])
+        if (!placesOf(pin)) return fail(404, 'AREA_NOT_FOUND', "That pincode isn't in the list.")
+        // The backend takes up to 1 MB on this path (64 KB elsewhere)
+        if (JSON.stringify(body ?? null).length > 1024 * 1024) return fail(413, 'REQUEST_TOO_LARGE', 'This request is too large')
+        const sent = (body as Json | null)?.shops as Json[] | undefined
+        const inIndia = (lat: unknown, lng: unknown) => typeof lat === 'number' && typeof lng === 'number' && lat >= 6 && lat <= 37.6 && lng >= 68 && lng <= 97.5
+        const badShop = (x: Json | null) =>
+          !x || typeof x.mapboxId !== 'string' || !x.mapboxId.trim() || x.mapboxId.length > 200 || (typeof x.name === 'string' && x.name.length > 300) ||
+          (x.latitude == null) !== (x.longitude == null) || (x.latitude != null && !inIndia(x.latitude, x.longitude))
+        if (!Array.isArray(sent) || sent.length > 3000 || sent.some(badShop)) return invalid({ shops: 'not valid' })
+        if (L.refreshError) return ok(L.refreshError.status, { code: L.refreshError.code, message: L.refreshError.message, details: {} })
+        const ids = sent.map((x) => x.mapboxId as string)
+        const shops = ids.map((id) => {
+          const l = L.saved.get(id)
+          const c = (L.found[pin] ?? []).find((x) => x.mapboxId === id)?.clozest as Json | null | undefined
+          return { mapboxId: id, lead: l ? leadView(l) : null, clozest: c ? { ...c, shopId: isSuper ? c.shopId : null } : null }
+        })
+        const saved = [...L.saved.values()]
+          .filter((l) => l.pincode === pin && l.status !== 'NEW' && !ids.includes(l.mapboxId as string))
+          .map((l) => ({
+            mapboxId: l.mapboxId, name: l.name ?? '', address: null, latitude: l.latitude ?? 0, longitude: l.longitude ?? 0, pincode: pin, onMapbox: false,
+            kind: 'LADIES_PARLOUR', chain: false, score: 60, priority: 'MEDIUM', phone: l.phone ?? null, website: null, hours: null, lead: leadView(l), clozest: null,
+          }))
+        return ok(200, {
+          pincode: pin, shops, saved, clozestOnly: (L.clozestOnly[pin] ?? []).map((x) => ({ ...x, shopId: isSuper ? x.shopId : null })),
+          asOf: new Date(Date.now() - 30_000).toISOString(),
         })
       }
       if (p === '/admin/leads/usage' && method === 'GET') return ok(200, { ...L.usage })

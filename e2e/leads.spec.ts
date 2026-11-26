@@ -484,3 +484,133 @@ test('after clearing saved results the keyboard stays on the area search', async
   await page.getByRole('button', { name: 'Yes, clear' }).click()
   await expect(page.getByLabel('Search areas')).toBeFocused()
 })
+
+test('a searched area updates by itself: a new Clozest signup and a teammate’s lead show without a reload or a map search', async ({ page, context, api }) => {
+  kukatpally(api)
+  await page.clock.install()
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
+  const areas = page.getByRole('list', { name: 'Areas', exact: true })
+  await areas.getByText('500072').click()
+  await page.getByRole('button', { name: 'Search 1 area on the map' }).click()
+  const list = page.getByRole('list', { name: 'Businesses' })
+  const tia = list.getByRole('listitem').filter({ hasText: "Tia's Beauty Parlour" })
+  const arifa = list.getByRole('listitem').filter({ hasText: 'Arifa mehandi artist' })
+  const status = page.getByTestId('live-status').last()
+  await expect(tia).toBeVisible()
+  await expect(tia.getByText(/^Clozest:/)).toHaveCount(0)
+  await expect(page.getByText(/update by themselves about every 30 seconds while you're on this screen/)).toBeVisible()
+  await expect(status).toContainText('Up to date · checked just now')
+  const onClozest = page.getByRole('region', { name: 'Numbers' }).getByText('On Clozest').locator('..')
+  await expect(onClozest).toHaveText(/^2On Clozest/)
+  const scans = () => api.calledTimes('POST', '/api/v1/admin/leads/scan/')
+  const checks = () => api.calledTimes('POST', '/api/v1/admin/leads/changes')
+  expect(scans()).toBe(1)
+  // Working down the businesses not on Clozest yet
+  const clozestFilter = page.getByRole('combobox', { name: 'Clozest', exact: true })
+  await clozestFilter.selectOption('OFF')
+  await expect(tia).toBeVisible()
+
+  // Tia registers on Clozest, and a teammate calls Arifa, while the page stays open
+  api.leads.found['500072'][0].clozest = { shopId: 'shop-tia', name: "Tia's Parlour", status: 'PENDING_VISIT' }
+  api.leads.changedAt['500072'] = new Date().toISOString()
+  api.leads.saved.set('mb-arifa', {
+    mapboxId: 'mb-arifa', pincode: '500072', status: 'CALLED', note: 'Call after 6', assignedTo: null, followUpOn: null,
+    name: 'Arifa mehandi artist', phone: null, latitude: 17.499, longitude: 78.41, whatsappOk: false, version: 0,
+    updatedAt: new Date().toISOString(), updatedBy: 'u5',
+  })
+  await page.clock.runFor(31_000)
+  // Tia no longer matches "not on Clozest", but stays where it was, marked, until the filter changes
+  await expect(tia.getByText('Clozest: Waiting for a visit')).toBeVisible()
+  await expect(tia.getByText('Changed: no longer matches your filters')).toBeVisible()
+  await expect(arifa).toContainText('Called')
+  await expect(status).toContainText(/Up to date · checked just now · 2 businesses updated just now/)
+  await clozestFilter.selectOption('ALL')
+  await expect(tia.getByText('Changed: no longer')).toHaveCount(0)
+  await expect(onClozest).toHaveText(/^3On Clozest/)
+  await clozestFilter.selectOption('ON')
+  await expect(tia).toBeVisible()
+  await clozestFilter.selectOption('OFF')
+  await expect(tia).toHaveCount(0)
+  await clozestFilter.selectOption('ALL')
+  // The area says its statuses were updated after the search
+  await page.clock.runFor(61_000)
+  await expect(areas.getByText(/found, searched .*, statuses updated just now/)).toBeVisible()
+  // No map search for any of it, and a reload shows the area as it is now
+  expect(scans()).toBe(1)
+  await page.reload()
+  await expect(tia.getByText('Clozest: Waiting for a visit')).toBeVisible()
+  expect(scans()).toBe(1)
+
+  // Hidden tab or locked phone: no checks; back in front: one right away
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.runFor(16_000)
+  const hiddenAt = checks()
+  await page.clock.runFor(61_000)
+  expect(checks()).toBe(hiddenAt)
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(checks).toBe(hiddenAt + 1)
+
+  // Checks refused for a while: no error popping up, but the line says the cards may be older; then it catches up
+  api.leads.checkError = { status: 503, code: 'SERVICE_BUSY', message: 'Busy.' }
+  // Half a minute at a time, each check answered before the next (the fake clock runs ahead of the network)
+  const busyFrom = checks()
+  for (let i = 0; i < 6; i++) {
+    await page.clock.runFor(31_000)
+    await page.waitForTimeout(150)
+  }
+  expect(checks() - busyFrom).toBeGreaterThanOrEqual(4)
+  await expect(status).toContainText("Can't check for updates right now. Statuses on the cards may be older")
+  await expect(page.getByText('Busy.')).toHaveCount(0)
+  api.leads.checkError = null
+  await page.clock.runFor(31_000)
+  await expect(status).toContainText('Up to date · checked just now')
+  await expect(tia).toBeVisible()
+})
+
+test('a teammate’s change to the lead you have open is shown before you save, and a lead they added is marked', async ({ page, context, api }) => {
+  kukatpally(api)
+  await page.clock.install()
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
+  await page.getByRole('list', { name: 'Areas', exact: true }).getByText('500072').click()
+  await page.getByRole('button', { name: 'Search 1 area on the map' }).click()
+  const list = page.getByRole('list', { name: 'Businesses' })
+  const tia = list.getByRole('listitem').filter({ hasText: "Tia's Beauty Parlour" })
+  await tia.getByRole('button', { name: 'Add note or status' }).click()
+  const sheet = page.getByRole('dialog', { name: "Tia's Beauty Parlour" })
+  await sheet.getByLabel('Note').fill('Met the owner')
+
+  const now = new Date().toISOString()
+  api.leads.saved.set('mb-tia', {
+    mapboxId: 'mb-tia', pincode: '500072', status: 'CALLED', note: 'Busy, call later', assignedTo: null, followUpOn: null, name: "Tia's Beauty Parlour",
+    phone: '9133576278', latitude: 17.49, longitude: 78.4, whatsappOk: false, version: 0, updatedAt: now, updatedBy: 'u5',
+  })
+  api.leads.saved.set('mb-glow', {
+    mapboxId: 'mb-glow', pincode: '500072', status: 'INTERESTED', note: 'Wants a demo', assignedTo: null, followUpOn: null, name: 'Glow Studio',
+    phone: '9848012345', latitude: 17.491, longitude: 78.401, whatsappOk: false, version: 0, updatedAt: now, updatedBy: 'u5',
+  })
+  await page.clock.runFor(31_000)
+  await expect(sheet.getByText('Ravi Field just updated this lead: it is now "Called" ("Busy, call later"). What you typed is still here')).toBeVisible()
+  await expect(sheet.getByLabel('Note')).toHaveValue('Met the owner')
+  // Saving shows theirs and keeps yours, as before
+  await sheet.getByRole('button', { name: 'Save' }).click()
+  await expect(sheet.getByText(/Someone else changed this lead just now/)).toBeVisible()
+  await sheet.getByRole('button', { name: 'Save' }).click()
+  await expect(sheet).toBeHidden()
+  expect(api.leads.saved.get('mb-tia')).toMatchObject({ note: 'Met the owner', version: 1 })
+
+  const glow = list.getByRole('listitem').filter({ hasText: 'Glow Studio' })
+  await expect(glow.getByText('New from the team')).toBeVisible()
+  await expect(glow).toContainText('added by a teammate while this page was open')
+  await expect(glow).toContainText('Interested')
+  expect(api.calledTimes('POST', '/api/v1/admin/leads/scan/')).toBe(1)
+})
