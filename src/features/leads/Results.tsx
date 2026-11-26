@@ -3,7 +3,7 @@ import { dateOnly } from '../../lib/time'
 import { Link } from 'react-router'
 import type { LeadKind, LeadShop, LeadStatus, ShopStatus } from '../../api/types'
 import { useAdmin } from '../../app/guards'
-import { Banner, Button, Card, EmptyState, Pill } from '../../components/ui'
+import { Banner, Button, Card, EmptyState, Loading, Pill } from '../../components/ui'
 import { STATUS_LABELS } from '../../lib/labels'
 import type { AreaWithDistrict } from './AreasTab'
 import { LeadSheet } from './LeadSheet'
@@ -32,6 +32,7 @@ const selectClass = 'min-h-12 w-full rounded-xl border border-line bg-surface px
 export function Results({ areas }: { areas: AreaWithDistrict[] }) {
   const me = useAdmin()
   const scansMap = useLeads((s) => s.scans)
+  const hydrating = useLeads((s) => s.hydrating)
   const filters = useLeads((s) => s.filters)
   const setFilters = useLeads((s) => s.setFilters)
   const resetFilters = useLeads((s) => s.resetFilters)
@@ -43,6 +44,7 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
   // Only areas of the districts still picked
   const known = new Set(areas.map((a) => a.pincode))
   const scans = Object.values(scansMap).filter((s) => known.has(s.pincode))
+  if (!scans.length && hydrating) return <Loading label="Loading the areas saved on this page…" />
   if (!scans.length) {
     return (
       <EmptyState
@@ -71,7 +73,7 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div id="lead-results" tabIndex={-1} className="flex flex-col gap-4 focus:outline-none">
       {partial.length > 0 && (
         <Banner tone="warn">
           The map didn't answer fully for {partial.map((s) => s.pincode).join(', ')}: a few businesses may be missing there. Search those areas again later.

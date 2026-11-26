@@ -3,6 +3,7 @@ import { leadsApi, scanProblem } from '../../api/leads'
 import type { Lead, LeadScan, LeadUsage } from '../../api/types'
 import { storage } from '../../lib/storage'
 import { NO_FILTERS, type Filters } from './logic'
+import { forgetAll, forgetScans, loadSaved, MAX_AGE_MS, saveScan } from './savedScans'
 
 const DISTRICTS_KEY = 'ada.leads.districts'
 
@@ -30,10 +31,16 @@ interface LeadsState {
   /** The areas ticked for searching. */
   selected: string[]
   /**
-   * Each searched area's answer, kept only while the page is open in this tab (the map's results may not be stored):
-   * a reload starts empty.
+   * Each searched area's answer, kept in this tab (also through reloads, see savedScans) until the tab is closed, for
+   * a day at most: the map's results are for short-term use only.
    */
   scans: Record<string, LeadScan>
+  /** When each area in {@link scans} was searched (ms): shown as "saved 2 h ago"; kept with it until the tab closes. */
+  savedAt: Record<string, number>
+  /** Whose saved searches were loaded into this tab (they are kept per person). */
+  user: string | null
+  /** True while this tab's kept areas are being read back (after a reload): the page shows loading, not "none". */
+  hydrating: boolean
   /** Areas whose last search failed, with the reason. */
   failed: Record<string, string>
   progress: ScanProgress | null
@@ -56,6 +63,14 @@ interface LeadsState {
   /** Searches the selected areas, {@link SCANS_AT_ONCE} at a time. */
   scanSelected: () => void
   stop: () => void
+  /** Loads this tab's saved searches for the signed-in person (once per person). */
+  hydrate: (user: string) => Promise<void>
+  /** Searches these areas again even though they are saved (fresh results from the map). */
+  searchAgain: (pincodes: string[]) => void
+  /** "Clear saved results": forgets every searched area in this tab; the next search asks the map again. */
+  clearSaved: () => void
+  /** Drops kept areas older than a day (also while the tab stays open). */
+  dropOld: (now?: number) => void
   /** A lead saved from the list: every area showing that business shows the new lead. */
   leadSaved: (mapboxId: string, lead: Lead) => void
   /** Sign-out: stops any search and forgets the results and the districts (a shared phone shows the next person none). */
@@ -96,7 +111,10 @@ export const useLeads = create<LeadsState>((set, get) => {
       const scan = await leadsApi.scan(pincode, signal)
       const failed = { ...get().failed }
       delete failed[pincode]
-      set((s) => ({ scans: { ...s.scans, [pincode]: scan }, failed, usage: scan.usage, selected: s.selected.filter((x) => x !== pincode) }))
+      const at = Date.now()
+      set((s) => ({ scans: { ...s.scans, [pincode]: scan }, savedAt: { ...s.savedAt, [pincode]: at }, failed, usage: scan.usage, selected: s.selected.filter((x) => x !== pincode) }))
+      const user = get().user
+      if (user) void saveScan(user, scan, at)
       if (scan.capReached) set({ stopped: CAP_REACHED })
     } catch (e) {
       if (signal.aborted) return
@@ -131,11 +149,24 @@ export const useLeads = create<LeadsState>((set, get) => {
     await next(signal)
   }
 
+  /** Searches these areas, {@link SCANS_AT_ONCE} at a time (ticked or not). */
+  function start(pincodes: string[]) {
+    if (get().progress || get().hydrating || !pincodes.length) return
+    controller = new AbortController()
+    busy = {}
+    const signal = controller.signal
+    set({ stopped: null, progress: { queue: [...pincodes], running: [], done: 0, total: pincodes.length } })
+    for (let i = 0; i < SCANS_AT_ONCE; i++) void next(signal)
+  }
+
   return {
     districts: savedDistricts(),
     areaFilter: [],
     selected: [],
     scans: {},
+    savedAt: {},
+    user: null,
+    hydrating: false,
     failed: {},
     progress: null,
     stopped: null,
@@ -176,14 +207,56 @@ export const useLeads = create<LeadsState>((set, get) => {
     setFilters: (f) => set((s) => ({ filters: { ...s.filters, ...f } })),
     resetFilters: () => set({ filters: NO_FILTERS }),
 
+    hydrate: async (user) => {
+      if (get().user === user) return
+      set({ user, hydrating: true })
+      const saved = await loadSaved(user)
+      if (get().user !== user) return
+      set({ hydrating: false })
+      if (!saved.length) return
+      set((s) => {
+        const scans = { ...s.scans }
+        const savedAt = { ...s.savedAt }
+        for (const x of saved) {
+          // A search made in this tab meanwhile is newer: keep it
+          if (!scans[x.pincode]) {
+            scans[x.pincode] = x.scan
+            savedAt[x.pincode] = x.savedAt
+          }
+        }
+        return { scans, savedAt }
+      })
+    },
+    // Only these areas, whatever else is ticked; what was kept stays shown until the fresh answer replaces it
+    searchAgain: (pincodes) => start(pincodes),
+    clearSaved: () => {
+      if (get().progress) return
+      forgetAll()
+      set({ scans: {}, savedAt: {} })
+    },
+    dropOld: (now = Date.now()) => {
+      const old = Object.keys(get().savedAt).filter((p) => now - get().savedAt[p] >= MAX_AGE_MS)
+      if (!old.length) return
+      set((s) => {
+        const scans = { ...s.scans }
+        const savedAt = { ...s.savedAt }
+        old.forEach((p) => {
+          delete scans[p]
+          delete savedAt[p]
+        })
+        return { scans, savedAt }
+      })
+      forgetScans(old)
+    },
+
     scanSelected: () => {
-      const s = get()
-      if (s.progress || !s.selected.length) return
-      controller = new AbortController()
-      busy = {}
-      const signal = controller.signal
-      set({ stopped: null, progress: { queue: [...s.selected], running: [], done: 0, total: s.selected.length } })
-      for (let i = 0; i < SCANS_AT_ONCE; i++) void next(signal)
+      get().dropOld()
+      const s0 = get()
+      if (s0.progress || s0.hydrating || !s0.selected.length) return
+      // Areas already searched and kept are shown as they are: only the others ask the map
+      const fresh = s0.selected.filter((p) => !s0.scans[p])
+      set({ selected: fresh })
+      start(fresh)
     },
     stop: () => {
       controller?.abort()
@@ -198,6 +271,8 @@ export const useLeads = create<LeadsState>((set, get) => {
             ? { ...scan, shops: scan.shops.map((x) => (x.mapboxId === mapboxId ? { ...x, lead } : x)) }
             : scan
         }
+        const user = s.user
+        if (user) for (const [pin, scan] of Object.entries(scans)) if (scan !== s.scans[pin]) void saveScan(user, scan, s.savedAt[pin] ?? Date.now())
         return { scans }
       }),
     reset: () => {
@@ -205,7 +280,8 @@ export const useLeads = create<LeadsState>((set, get) => {
       controller = null
       busy = {}
       storage.remove(DISTRICTS_KEY)
-      set({ districts: [], areaFilter: [], selected: [], scans: {}, failed: {}, progress: null, stopped: null, usage: null, filters: NO_FILTERS, areaDistricts: {} })
+      forgetAll()
+      set({ user: null, hydrating: false, savedAt: {}, districts: [], areaFilter: [], selected: [], scans: {}, failed: {}, progress: null, stopped: null, usage: null, filters: NO_FILTERS, areaDistricts: {} })
     },
   }
 })

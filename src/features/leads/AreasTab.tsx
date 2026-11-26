@@ -6,6 +6,8 @@ import type { LeadArea } from '../../api/types'
 import { useAdmin } from '../../app/guards'
 import { Banner, Button, Card, EmptyState, ErrorState, Loading, Spinner } from '../../components/ui'
 import { isSuperAdmin } from '../../lib/roles'
+import { howLong } from '../../lib/time'
+import { useNow } from '../../lib/useNow'
 import { useDebounced } from '../../lib/useDebounced'
 import { count, matchAreas, shownAreas } from './logic'
 import { Results } from './Results'
@@ -21,6 +23,12 @@ export interface AreaWithDistrict extends LeadArea {
  */
 export function AreasTab() {
   const districts = useLeads((s) => s.districts)
+  const hydrate = useLeads((s) => s.hydrate)
+  const userId = useAdmin().userId
+  // Areas searched earlier in this tab (before a reload) come back without asking the map again
+  useEffect(() => {
+    void hydrate(userId)
+  }, [hydrate, userId])
   const areaQueries = useQueries({
     queries: districts.map((d) => ({
       queryKey: leadKeys.areas(d.district, d.state),
@@ -172,17 +180,60 @@ function DistrictPicker() {
 function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
   const me = useAdmin()
   const superAdmin = isSuperAdmin(me.adminRole)
-  const { areaFilter, setAreaFilter, selected, toggle, select, clearSelection, scans, failed, progress, stopped, scanSelected, stop } = useLeads()
+  const { areaFilter, setAreaFilter, selected, toggle, select, clearSelection, scans, savedAt, failed, progress, stopped, scanSelected, stop, searchAgain, clearSaved } = useLeads()
   const usage = useUsage()
   const liveUsage = useLeads((s) => s.usage) ?? usage.data ?? null
   const [typed, setTyped] = useState('')
   const [confirmBig, setConfirmBig] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [shownNote, setShownNote] = useState<string | null>(null)
   const listId = useId()
+  // "searched 5 min ago" moves on by itself, and areas kept over a day are dropped while the page stays open
+  const now = useNow(60_000)
+  const dropOld = useLeads((s) => s.dropOld)
+  const hydrating = useLeads((s) => s.hydrating)
+  useEffect(() => dropOld(now), [now, dropOld])
   const suggestions = matchAreas(areas, typed, areaFilter)
   const shown = shownAreas(areas, areaFilter)
   const mine = areas.filter((a) => a.mine)
   const byPin = new Map(areas.map((a) => [a.pincode, a]))
   const allShownTicked = shown.length > 0 && shown.every((a) => selected.includes(a.pincode))
+  // Ticked areas already searched in this tab are shown from what was kept: only the new ones ask the map
+  const tickedSaved = selected.filter((p) => scans[p]).length
+  const tickedNew = selected.length - tickedSaved
+  // Only areas of the districts picked (a removed district's areas aren't shown, so not counted)
+  const savedPins = Object.keys(scans).filter((p) => byPin.has(p))
+  const oldest = savedPins.length ? Math.min(...savedPins.map((p) => savedAt[p] ?? now)) : null
+  const plural = (n: number) => `${n} area${n === 1 ? '' : 's'}`
+  const ago = (at: number | undefined) => {
+    const text = howLong(new Date(at ?? now).toISOString(), now)
+    return text === 'just now' ? text : `${text} ago`
+  }
+  const searchLabel = !selected.length
+    ? 'Tick areas to search'
+    : tickedNew === 0
+      ? `Already shown below (${plural(tickedSaved)})`
+      : tickedSaved === 0
+        ? `Search ${plural(tickedNew)} on the map`
+        : `Show ${plural(selected.length)} (${tickedSaved} saved, ${tickedNew} new)`
+  // The big-search question goes away once it no longer applies
+  useEffect(() => {
+    if (confirmBig && tickedNew <= 10) setConfirmBig(false)
+  }, [confirmBig, tickedNew])
+
+  function press() {
+    setShownNote(null)
+    if (tickedNew > 10) return setConfirmBig(true)
+    if (tickedNew === 0) {
+      // Nothing to ask the map: point to where they already are
+      setShownNote(`${plural(tickedSaved)} already searched: their businesses are in the list below.`)
+      scanSelected()
+      document.getElementById('lead-results')?.focus()
+      document.getElementById('lead-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    scanSelected()
+  }
 
   const add = (pincode: string) => {
     setAreaFilter([...areaFilter, pincode])
@@ -261,6 +312,11 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
             My areas ({mine.length})
           </Button>
         )}
+        {savedPins.length > 0 && (
+          <Button variant="secondary" className="min-h-11" onClick={() => setAreaFilter(savedPins)}>
+            Searched ({savedPins.length})
+          </Button>
+        )}
         {selected.length > 0 && (
           <Button variant="ghost" className="min-h-11" onClick={clearSelection}>
             Untick all
@@ -290,11 +346,31 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
                   <span className="text-xs text-muted">
                     {a.district} · {count(a.onClozest)} on Clozest · {count(a.contacted)} contacted
                     {a.signedUp ? ` · ${count(a.signedUp)} signed up` : ''}
-                    {running ? ' · searching…' : queued ? ' · waiting' : scanned ? ` · ${count(scanned.shops.length)} found` : ''}
+                    {running
+                      ? ' · searching…'
+                      : queued
+                        ? ' · waiting'
+                        : scanned
+                          ? ` · ${count(scanned.shops.length)} found, searched ${ago(savedAt[a.pincode])}`
+                          : ''}
                   </span>
                   {failed[a.pincode] && <span className="text-xs text-bad">{failed[a.pincode]}</span>}
                 </span>
               </label>
+              {scanned && !progress && (
+                <button
+                  type="button"
+                  aria-label={`Search again (uses map searches): ${a.pincode}`}
+                  onClick={() => {
+                    searchAgain([a.pincode])
+                    // The button goes while it searches: keep the keyboard on Stop
+                    requestAnimationFrame(() => document.getElementById('lead-stop')?.focus())
+                  }}
+                  className="ml-10 min-h-11 text-sm font-semibold text-link underline"
+                >
+                  Search again (uses map searches)
+                </button>
+              )}
             </li>
           )
         })}
@@ -310,7 +386,7 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
             <span className="text-sm text-muted">
               Searched {progress.done} of {progress.total} areas. You can keep working below meanwhile.
             </span>
-            <Button variant="secondary" className="min-h-11" onClick={stop}>
+            <Button id="lead-stop" variant="secondary" className="min-h-11" onClick={stop}>
               Stop
             </Button>
           </div>
@@ -320,7 +396,7 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
           {confirmBig && (
             <Banner tone="warn">
               <span className="block">
-                {selected.length} areas use about {count(selected.length * 40)} to {count(selected.length * 150)} of this month's map searches
+                {tickedNew} new areas use about {count(tickedNew * 40)} to {count(tickedNew * 150)} of this month's map searches
                 {liveUsage ? ` (${count(Math.max(0, liveUsage.cap - liveUsage.used))} left)` : ''}. Search them all?
               </span>
               <span className="mt-2 flex gap-2">
@@ -331,7 +407,7 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
                     scanSelected()
                   }}
                 >
-                  Yes, search {selected.length}
+                  Yes, search {tickedNew}
                 </Button>
                 <Button variant="secondary" className="min-h-11" onClick={() => setConfirmBig(false)}>
                   Not now
@@ -339,10 +415,48 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
               </span>
             </Banner>
           )}
-          <Button disabled={!selected.length} onClick={() => (selected.length > 10 ? setConfirmBig(true) : scanSelected())}>
-            {selected.length ? `Search ${selected.length} area${selected.length === 1 ? '' : 's'} on the map` : 'Tick areas to search'}
+          <Button id="lead-search" disabled={!selected.length || hydrating} onClick={press}>
+            {hydrating ? 'Loading saved areas…' : searchLabel}
           </Button>
+          {shownNote && (
+            <p className="text-sm text-muted" role="status">
+              {shownNote}
+            </p>
+          )}
         </>
+      )}
+      {savedPins.length > 0 && !progress && (
+        <div className="flex flex-col gap-2 rounded-xl border border-line px-3 py-2">
+          <p className="text-sm text-muted">
+            {plural(savedPins.length)} saved on this page (oldest searched {ago(oldest ?? undefined)}). Saved until you close this page, up to 1 day: no map
+            searches used. Statuses on the cards are from when the area was searched.
+          </p>
+          {confirmClear ? (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Clear saved results?">
+              <span className="text-sm">Clear {plural(savedPins.length)}? Seeing them again uses map searches.</span>
+              <Button
+                variant="secondary"
+                className="min-h-11"
+                onClick={() => {
+                  clearSaved()
+                  setConfirmClear(false)
+                  setShownNote(null)
+                  // The Search button is usually disabled now (nothing ticked): keep the keyboard on the area search
+                  requestAnimationFrame(() => document.getElementById('area-search')?.focus())
+                }}
+              >
+                Yes, clear
+              </Button>
+              <Button variant="ghost" className="min-h-11" onClick={() => setConfirmClear(false)}>
+                Keep them
+              </Button>
+            </div>
+          ) : (
+            <Button variant="ghost" className="min-h-11 self-start" onClick={() => setConfirmClear(true)}>
+              Clear saved results
+            </Button>
+          )}
+        </div>
       )}
       {liveUsage && (
         <p className="text-xs text-muted">

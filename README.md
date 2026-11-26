@@ -268,6 +268,21 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### Unreleased — Leads: searched areas saved on the page
+
+- Searched areas are saved in the browser tab (sessionStorage, gzip-compressed, per person) so a reload, or going to
+  another admin page and back, shows them again **without using map searches**. The browser wipes them when the tab
+  is closed; they also go on sign-out, after 24 hours (also while the page stays open; Mapbox allows its results for
+  short-term use only), or with **Clear saved results** (asks first). A new tab starts empty. If storage fills up, the
+  oldest areas make room.
+- Ticking an area already saved shows it from what was saved: the button says "Show 3 areas (2 saved, 1 new)" and only
+  new areas ask the map (and count for the "over 10 areas" question); with only saved areas ticked it says "Already
+  shown below" and goes to the list. **Search again (uses map searches)** on an area searches just that area; its
+  saved results stay until the fresh ones arrive. **Searched (n)** shows only the searched areas.
+- Each area says when it was searched (updated every minute); statuses on the cards are from then (saving still
+  checks the latest and shows anyone else's change). While saved areas load after a reload, the page says so.
+- If the browser blocks storage (some private windows), the page works as before: a reload searches again.
+
 ### Unreleased — Leads
 
 Needs the backend's Leads round (V96–V98, `/admin/leads/...`). Merge the backend first; searching areas also needs
@@ -302,8 +317,8 @@ Needs the backend's Leads round (V96–V98, `/admin/leads/...`). Merge the backe
   - **Follow-ups:** call-backs due today or earlier, past ones marked; **My leads**: every lead given to you that was
     tried, from its saved details (no map search); super admins can see everyone's.
   - **Funnel** (super admins): per area and per person, saved → contacted → interested → signed up.
-  - Results are searched live and kept only while the tab is open (the map's terms don't allow storing them); the
-    team's own work is always saved.
+  - Results are searched live and saved only in this tab, for up to a day (see "searched areas saved on the page"
+    above; the map's terms allow short-term use only); the team's own work is always saved.
 
 ### Unreleased — Analytics
 
