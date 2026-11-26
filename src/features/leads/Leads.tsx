@@ -156,13 +156,13 @@ function DueTab() {
   )
 }
 
-/** Super admins: each area's and each person's numbers for one of the picked districts. */
+/** Super admins: each area's and each person's numbers for one of the picked cities or districts. */
 function FunnelTab() {
   const districts = useLeads((s) => s.districts)
   const [index, setIndex] = useState(0)
   const d = districts[Math.min(index, districts.length - 1)]
-  const funnel = useFunnel(d?.district ?? '', d?.state ?? '', !!d)
-  if (!d) return <EmptyState title="Pick a district first" body="Open Areas and pick a city or district; its funnel shows here." />
+  const funnel = useFunnel(d?.kind ?? 'DISTRICT', d?.district ?? '', d?.state ?? '', !!d)
+  if (!d) return <EmptyState title="Pick a city or district first" body="Open Areas and pick a city or district; its funnel shows here." />
   return (
     <section aria-labelledby="funnel-title" className="flex flex-col gap-3">
       <h2 id="funnel-title" className="font-semibold">
@@ -170,15 +170,16 @@ function FunnelTab() {
       </h2>
       {districts.length > 1 && (
         <label className="flex flex-col gap-2 text-sm text-muted">
-          District
+          City or district
           <select
             value={index}
             onChange={(e) => setIndex(Number(e.target.value))}
             className="min-h-12 rounded-xl border border-line bg-surface px-4 text-base text-ink"
           >
             {districts.map((x, i) => (
-              <option key={`${x.district}|${x.state}`} value={i}>
-                {x.district}, {x.state}
+              <option key={`${x.kind}|${x.district}|${x.state}`} value={i}>
+                {x.district}
+                {x.kind === 'CITY' ? ' (city)' : ''}, {x.state}
               </option>
             ))}
           </select>
