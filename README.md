@@ -268,6 +268,25 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### Unreleased — Leads: find any place in India
+
+- **City or district** finds any place in India, typed any way: a city or another name for it ("Hyderabad",
+  "Bangalore"), a district ("Saharsa"), a pincode ("500087"), a post office ("JJ Nagar"). A city covers all its
+  districts: "Hyderabad" lists all 169 areas of Hyderabad, Medchal Malkajgiri, Ranga Reddy and Sangareddy (Patancheru,
+  Ameenpur, Tellapur), each saying its district.
+  A pincode or post office is offered as its city ("500087 · JJ Nagar Colony · Hyderabad"); picking it opens the city
+  with that area ticked. Picked places show as "Hyderabad (city), Telangana".
+- A name our list lacks ("Yapral") is looked up on the map ("Found on the map (used 1 map search):"), once typing has
+  paused about a second; when our list has something that may be a look-alike elsewhere (Madhapur the village), a
+  "Not the one? Look up … on the map (uses 1 map search)" row does it on a tap. Enter picks the first row shown.
+- A result for one area says "Opens Hyderabad (city) with this area ticked"; the Hyderabad district next to the city
+  says "District only". Picking a city replaces the chips of its districts already picked (their ticks stay); removing
+  a place keeps areas another picked place still lists. Over 30 areas, a line points to Search areas.
+- The **area search** looks across India when nothing matches in the places picked ("Not in the places picked.
+  Elsewhere in India:"); tapping a result shows its city or district with that area ticked. Nothing is ever added to
+  the data from here.
+- The Greater Hyderabad one-taps are gone (the city covers them); the funnel works for a city too.
+
 ### Unreleased — Leads: searched areas saved on the page
 
 - Searched areas are saved in the browser tab (sessionStorage, gzip-compressed, per person) so a reload, or going to
