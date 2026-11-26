@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { leadsApi, scanProblem } from '../../api/leads'
+import { ApiError } from '../../api/errors'
 import type { Lead, LeadScan, LeadUsage, PlaceKind } from '../../api/types'
 import { storage } from '../../lib/storage'
 import { NO_FILTERS, type Filters } from './logic'
+import { applyRefresh, areasFor, later, pincodesOf, REFRESH_PER_CHECK, REQUEST_TIMEOUT_MS, seenOf, watchList } from './liveUpdates'
 import { forgetAll, forgetScans, loadSaved, MAX_AGE_MS, saveScan } from './savedScans'
 
 const DISTRICTS_KEY = 'ada.leads.districts'
@@ -17,6 +19,20 @@ export interface District {
   district: string
   state: string
 }
+
+export interface LiveState {
+  /** The last check that got an answer. */
+  okAt: number | null
+  /** The last check that failed (no connection, refused, server busy). */
+  failedAt: number | null
+  /** Changed areas still waiting to be brought up to date (the next checks). */
+  pending: number
+  /** When businesses on screen last changed, and how many. */
+  updatedAt: number | null
+  updated: number
+}
+
+const NO_LIVE: LiveState = { okAt: null, failedAt: null, pending: 0, updatedAt: null, updated: 0 }
 
 export interface ScanProgress {
   /** Pincodes still to search, in order. */
@@ -44,6 +60,15 @@ interface LeadsState {
   user: string | null
   /** True while this tab's kept areas are being read back (after a reload): the page shows loading, not "none". */
   hydrating: boolean
+  /**
+   * Up to when each searched area is known to be current (the server's time from the last check that found nothing
+   * there, or the last refresh): the next check asks from here. Not kept through a reload (the area's `asOf` is).
+   */
+  checkedAt: Record<string, string>
+  /** When each searched area was last confirmed up to date on this page (ms): "updated 1 min ago". */
+  confirmedAt: Record<string, number>
+  /** How keeping the areas up to date is going, for the line that says so (times in ms). */
+  live: LiveState
   /** Areas whose last search failed, with the reason. */
   failed: Record<string, string>
   progress: ScanProgress | null
@@ -75,6 +100,13 @@ interface LeadsState {
   clearSaved: () => void
   /** Drops kept areas older than a day (also while the tab stays open). */
   dropOld: (now?: number) => void
+  /**
+   * Asks which searched areas changed (a lead saved or signed up, a Clozest salon registered or changed) and brings up
+   * to {@link REFRESH_PER_CHECK} of the areas showing them up to date (longest waiting first): from our own data, no map
+   * search. Quiet: a refused or failed check just waits for the next one (`live` says so). Answers how many businesses
+   * changed on screen.
+   */
+  checkChanges: () => Promise<number>
   /** A lead saved from the list: every area showing that business shows the new lead. */
   leadSaved: (mapboxId: string, lead: Lead) => void
   /** Sign-out: stops any search and forgets the results and the districts (a shared phone shows the next person none). */
@@ -102,6 +134,8 @@ export const placeKey = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/g
 const same = (a: District, b: District) => a.kind === b.kind && placeKey(a.district) === placeKey(b.district) && placeKey(a.state) === placeKey(b.state)
 
 let controller: AbortController | null = null
+/** A check for changes is running (one at a time: a slow one is never doubled up by the next). */
+let checking = false
 /** Times each area was sent back by a busy server in this search. */
 let busy: Record<string, number> = {}
 
@@ -179,6 +213,9 @@ export const useLeads = create<LeadsState>((set, get) => {
     savedAt: {},
     user: null,
     hydrating: false,
+    checkedAt: {},
+    confirmedAt: {},
+    live: NO_LIVE,
     failed: {},
     progress: null,
     stopped: null,
@@ -251,7 +288,7 @@ export const useLeads = create<LeadsState>((set, get) => {
     clearSaved: () => {
       if (get().progress) return
       forgetAll()
-      set({ scans: {}, savedAt: {} })
+      set({ scans: {}, savedAt: {}, checkedAt: {}, confirmedAt: {}, live: NO_LIVE })
     },
     dropOld: (now = Date.now()) => {
       const old = Object.keys(get().savedAt).filter((p) => now - get().savedAt[p] >= MAX_AGE_MS)
@@ -282,6 +319,91 @@ export const useLeads = create<LeadsState>((set, get) => {
       controller = null
       set({ progress: null })
     },
+    checkChanges: async () => {
+      const s0 = get()
+      const user = s0.user
+      if (checking || !user || s0.hydrating || !Object.keys(s0.scans).length) return 0
+      checking = true
+      const timeout = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      try {
+        const watched = watchList(s0.scans, s0.checkedAt)
+        let changes
+        try {
+          changes = await leadsApi.changes(watched, timeout())
+        } catch {
+          if (get().user === user) set((s) => ({ live: { ...s.live, failedAt: Date.now() } }))
+          return 0
+        }
+        if (get().user !== user) return 0
+        const asOf = changes.asOf
+        const changed = new Set(changes.areas.map((a) => a.pincode))
+        set((s) => {
+          const checkedAt = { ...s.checkedAt }
+          const confirmedAt = { ...s.confirmedAt }
+          const at = Date.now()
+          // A searched area is up to date now only when none of its pincodes changed (else it waits for its refresh);
+          // a watched pincode that isn't searched itself, when it didn't change
+          for (const w of watched) {
+            if (changed.has(w.pincode)) continue
+            const own = s.scans[w.pincode]
+            if (own && pincodesOf(own).some((p) => changed.has(p))) continue
+            checkedAt[w.pincode] = later(checkedAt[w.pincode], asOf)
+          }
+          for (const scan of Object.values(s.scans)) if (!pincodesOf(scan).some((p) => changed.has(p))) confirmedAt[scan.pincode] = at
+          return { checkedAt, confirmedAt }
+        })
+        const targets = areasFor(changed, get().scans, get().checkedAt)
+        const done = new Set<string>()
+        let updated = 0
+        for (const pincode of targets.slice(0, REFRESH_PER_CHECK)) {
+          const scan = get().scans[pincode]
+          if (!scan) continue
+          try {
+            const now = await leadsApi.refresh(pincode, seenOf(scan), timeout())
+            if (get().user !== user) return updated
+            // Searched again or a lead saved meanwhile: this answer may be older than what is shown; the next check
+            // finds the area again
+            if (get().scans[pincode] !== scan) continue
+            const applied = applyRefresh(scan, now)
+            set((s) => ({
+              scans: { ...s.scans, [pincode]: applied.scan },
+              checkedAt: { ...s.checkedAt, [pincode]: later(s.checkedAt[pincode], now.asOf) },
+              confirmedAt: { ...s.confirmedAt, [pincode]: Date.now() },
+            }))
+            void saveScan(user, applied.scan, get().savedAt[pincode] ?? Date.now())
+            updated += applied.changed
+            done.add(pincode)
+          } catch (e) {
+            // One area the server won't take (no longer in the list, too big): skipped until something newer changes
+            // there, the others go on. Too many, the server busy, no connection: the rest wait for the next check.
+            if (get().user !== user) return updated
+            if (e instanceof ApiError && [400, 404, 413].includes(e.status)) {
+              set((s) => ({ checkedAt: { ...s.checkedAt, [pincode]: later(s.checkedAt[pincode], asOf) } }))
+              done.add(pincode)
+              continue
+            }
+            break
+          }
+        }
+        // A watched pincode that isn't a searched area is up to date once every area showing it is
+        set((s) => {
+          const checkedAt = { ...s.checkedAt }
+          for (const w of changed) {
+            if (w in s.scans) continue
+            const showing = areasFor(new Set([w]), s.scans, s.checkedAt)
+            if (showing.every((p) => done.has(p))) checkedAt[w] = later(checkedAt[w], asOf)
+          }
+          const at = Date.now()
+          return {
+            checkedAt,
+            live: { okAt: at, failedAt: s.live.failedAt, pending: Math.max(0, targets.length - done.size), updatedAt: updated ? at : s.live.updatedAt, updated: updated || s.live.updated },
+          }
+        })
+        return updated
+      } finally {
+        checking = false
+      }
+    },
     leadSaved: (mapboxId, lead) =>
       set((s) => {
         const scans: Record<string, LeadScan> = {}
@@ -300,7 +422,7 @@ export const useLeads = create<LeadsState>((set, get) => {
       busy = {}
       storage.remove(DISTRICTS_KEY)
       forgetAll()
-      set({ user: null, hydrating: false, savedAt: {}, districts: [], areaFilter: [], selected: [], scans: {}, failed: {}, progress: null, stopped: null, usage: null, filters: NO_FILTERS, areaDistricts: {} })
+      set({ user: null, hydrating: false, savedAt: {}, checkedAt: {}, confirmedAt: {}, live: NO_LIVE, districts: [], areaFilter: [], selected: [], scans: {}, failed: {}, progress: null, stopped: null, usage: null, filters: NO_FILTERS, areaDistricts: {} })
     },
   }
 })
