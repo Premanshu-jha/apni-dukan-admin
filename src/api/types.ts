@@ -798,17 +798,28 @@ export interface LeadPerson {
   name: string | null
 }
 
+/** A city (all areas of its districts: Hyderabad is India Post's Hyderabad, Medchal Malkajgiri and Ranga Reddy) or a district. */
+export type PlaceKind = 'CITY' | 'DISTRICT'
+
 export interface LeadDistrict {
+  kind: PlaceKind
+  /** Its name (a city's too: "Hyderabad"). */
   district: string
   state: string
   pincodes: number
-  /** What matched when it wasn't the district's name, e.g. "Kukatpally (500072)". */
+  /** A city's districts; a district: itself. */
+  districts: string[]
+  /** What matched when it wasn't its name: "Bangalore", "500087 · JJ Nagar Colony", "Yapral (500087)". */
   matched: string | null
+  /** The area that matched: ticked when it's picked. */
+  pincode: string | null
 }
 
 export interface LeadArea {
   pincode: string
   places: string
+  /** India Post's district it's filed under (shown in a city: "Medchal Malkajgiri"). */
+  district: string
   /** The signed-in field agent covers this pincode. */
   mine: boolean
   /** India Post has a point for it (one without may still be on Mapbox). */
@@ -820,8 +831,10 @@ export interface LeadArea {
 }
 
 export interface LeadAreas {
+  kind: PlaceKind
   district: string
   state: string
+  districts: string[]
   areas: LeadArea[]
 }
 
@@ -935,6 +948,7 @@ export interface LeadDue {
 }
 
 export interface LeadFunnel {
+  kind: PlaceKind
   district: string
   state: string
   areas: { pincode: string; places: string; touched: number; contacted: number; interested: number; notInterested: number; signedUp: number }[]
