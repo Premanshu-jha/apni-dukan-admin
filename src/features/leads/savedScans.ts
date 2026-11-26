@@ -108,27 +108,38 @@ export async function loadSaved(user: string, now: number = Date.now()): Promise
   return out
 }
 
-/** Keeps one searched area for this tab (replacing an older search of it); full storage makes room from the oldest. */
+/** The latest save asked for per area: a slower, older save finishing after a newer one is dropped. */
+const latest: Record<string, number> = {}
+let saves = 0
+
+/**
+ * Keeps one searched area for this tab (replacing an older search of it); full storage makes room from the oldest.
+ * Called often (every update of an area while the page is open), so the other areas are read only when storage is
+ * full.
+ */
 export async function saveScan(user: string, scan: LeadScan, savedAt: number = Date.now()): Promise<void> {
   const started = generation
+  const mine = ++saves
+  latest[scan.pincode] = mine
   let value: string
   try {
     value = JSON.stringify({ user, savedAt, data: await zip(JSON.stringify(scan)) } satisfies Stored)
   } catch {
     return
   }
-  if (generation !== started) return
+  if (generation !== started || latest[scan.pincode] !== mine) return
   const key = PREFIX + scan.pincode
-  // Oldest first: what goes when storage is full
-  const others = keys()
-    .filter((k) => k !== key)
-    .map((k) => ({ k, at: read(k)?.savedAt ?? 0 }))
-    .sort((a, b) => a.at - b.at)
+  let others: { k: string; at: number }[] | null = null
   for (;;) {
     try {
       sessionStorage.setItem(key, value)
       return
     } catch {
+      // Oldest first: what goes when storage is full
+      others ??= keys()
+        .filter((k) => k !== key)
+        .map((k) => ({ k, at: read(k)?.savedAt ?? 0 }))
+        .sort((a, b) => a.at - b.at)
       const oldest = others.shift()
       if (!oldest) return // blocked, or this one area alone is too big: just not kept
       remove(oldest.k)
