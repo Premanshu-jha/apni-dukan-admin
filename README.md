@@ -268,6 +268,37 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
 
 ## Changelog
 
+### Unreleased — Leads: searched areas update by themselves
+
+Needs the backend's "keep searched areas up to date" (`POST /admin/leads/changes`, `/admin/leads/refresh/{pincode}`).
+Merge the backend first; until it is live the checks get 404 and the line says it can't check for updates.
+
+- While the Leads page's Areas screen is on screen, searched areas **update by themselves, with no map searches**: a
+  salon there that signs up on Clozest (or changes status) shows "Clozest: …" on its card, a lead a teammate worked
+  shows their status, and a contacted lead they added appears, marked "New from the team" ("added by a teammate while
+  this page was open"). The "On Clozest" filter, the numbers, the area counts and the funnel follow. The updated areas
+  stay saved, so a reload shows them as they are now.
+- A line under the list (and under the saved areas) says how it's going: "Up to date · checked just now · 2 businesses
+  updated 1 min ago · 3 more areas updating", or, when checks don't get through for 2 minutes (no connection, server
+  busy, not deployed yet), "Can't check for updates right now. Statuses on the cards may be older". Each area says
+  "statuses updated 1 min ago" next to when it was searched. The note under the saved areas says what updates by
+  itself and that Search again is needed only for new or closed businesses or a changed phone.
+- A card an update takes out of the filters in use (it signed up while you look at "Not on Clozest") stays where it
+  was, marked "Changed: no longer matches your filters", until you change a filter: nothing jumps away under
+  your thumb. A lead sheet open while a teammate saves that lead says so ("Ravi Field just updated this lead: it is now
+  "Called" …"); what you typed stays, and saving shows theirs as before.
+- How: right away (after a reload, coming back to the page or the tab) and then every 30 seconds, never while the tab
+  is hidden or the phone is locked, at most 4 a minute, one at a time, each given up after 15 s. The page watches the
+  searched areas and the pincodes of the businesses in them (a business the map files under the next pincode has its
+  lead saved there). Up to 5 changed areas are brought up to date per check, those waiting longest first. A business's
+  phone goes back with the scan's key for it (the server uses no other phone for matching). One area the server won't
+  take is skipped and the others go on; a refused or failed check waits for the next one.
+- An area searched again, or a lead saved, while its update was on the way keeps the newer result; an older save of an
+  area finishing after a newer one never replaces it; saving an area reads the other saved areas only when storage is
+  full.
+- Not seen until the area is searched again: a salon or lead moving to another pincode, a new owner or an owner's new
+  phone number. Areas saved before this change are brought up to date once on the first check.
+
 ### Unreleased — Leads: find any place in India
 
 - **City or district** finds any place in India, typed any way: a city or another name for it ("Hyderabad",
@@ -298,8 +329,8 @@ add the site's address to the backend's `CORS_ALLOWED_ORIGINS`. The page asks se
   new areas ask the map (and count for the "over 10 areas" question); with only saved areas ticked it says "Already
   shown below" and goes to the list. **Search again (uses map searches)** on an area searches just that area; its
   saved results stay until the fresh ones arrive. **Searched (n)** shows only the searched areas.
-- Each area says when it was searched (updated every minute); statuses on the cards are from then (saving still
-  checks the latest and shows anyone else's change). While saved areas load after a reload, the page says so.
+- Each area says when it was searched (updated every minute); saving still checks the latest and shows anyone else's
+  change. While saved areas load after a reload, the page says so.
 - If the browser blocks storage (some private windows), the page works as before: a reload searches again.
 
 ### Unreleased — Leads

@@ -45,6 +45,7 @@ export function LeadSheet({
   shop,
   title,
   lead: initial,
+  liveLead,
   onClose,
   onSaved,
 }: {
@@ -52,6 +53,8 @@ export function LeadSheet({
   shop: Pick<LeadShop, 'name' | 'phone' | 'latitude' | 'longitude' | 'pincode' | 'onMapbox'>
   title: string
   lead: Lead | null
+  /** The lead as the list shows it now: when a teammate's change arrives while this is open, it says so. */
+  liveLead?: Lead | null
   onClose: () => void
   onSaved: (lead: Lead) => void
 }) {
@@ -84,6 +87,8 @@ export function LeadSheet({
   // Once tried, a lead can't go back to "Not contacted"
   const statuses = base && base.status !== 'NEW' ? STATUSES.filter((x) => x !== 'NEW') : STATUSES
   const dirty = touched.size > 0
+  // A teammate saved this lead after the sheet opened (an update of the list brought it): say so before the save
+  const changedMeanwhile = liveLead != null && liveLead.version !== (base?.version ?? -1) && !conflict && !busy
 
   /** A tap outside or Escape: with changes, ask first, so a slip doesn't lose them. */
   function requestClose() {
@@ -144,6 +149,12 @@ export function LeadSheet({
           <Banner tone="good">
             Signed up on Clozest on {dateIst(base.signedUpAt)}
             {base.creditedTo ? ` · credit: ${base.creditedTo.name ?? 'someone who left'}` : ''}
+          </Banner>
+        )}
+        {changedMeanwhile && (
+          <Banner tone="warn">
+            {liveLead!.updatedBy?.name ?? 'Someone on the team'} just updated this lead: it is now "{LEAD_STATUS_LABELS[liveLead!.status]}"
+            {liveLead!.note ? ` ("${liveLead!.note}")` : ''}. What you typed is still here; check it against theirs before you save.
           </Banner>
         )}
         {conflict && (

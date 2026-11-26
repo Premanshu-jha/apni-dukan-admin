@@ -12,6 +12,8 @@ import { useDebounced } from '../../lib/useDebounced'
 import { count, matchAreas, shownAreas } from './logic'
 import { Results } from './Results'
 import { placeKey, useLeads } from './store'
+import { LiveStatus } from './LiveStatus'
+import { useLiveUpdates } from './useLiveUpdates'
 
 /** An area with India Post's district it's filed under (a city lists areas of several). */
 export type AreaWithDistrict = LeadArea
@@ -28,6 +30,8 @@ export function AreasTab() {
   useEffect(() => {
     void hydrate(userId)
   }, [hydrate, userId])
+  // New Clozest signups and the team's work show in searched areas by themselves (no map searches)
+  useLiveUpdates()
   const areaQueries = useQueries({
     queries: districts.map((d) => ({
       queryKey: leadKeys.areas(d.kind, d.district, d.state),
@@ -294,7 +298,7 @@ function DistrictPicker() {
 function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
   const me = useAdmin()
   const superAdmin = isSuperAdmin(me.adminRole)
-  const { areaFilter, setAreaFilter, selected, toggle, select, clearSelection, scans, savedAt, failed, progress, stopped, scanSelected, stop, searchAgain, clearSaved } = useLeads()
+  const { areaFilter, setAreaFilter, selected, toggle, select, clearSelection, scans, savedAt, confirmedAt, failed, progress, stopped, scanSelected, stop, searchAgain, clearSaved } = useLeads()
   const usage = useUsage()
   const liveUsage = useLeads((s) => s.usage) ?? usage.data ?? null
   const [typed, setTyped] = useState('')
@@ -490,7 +494,9 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
                       : queued
                         ? ' · waiting'
                         : scanned
-                          ? ` · ${count(scanned.shops.length)} found, searched ${ago(savedAt[a.pincode])}`
+                          ? ` · ${count(scanned.shops.length)} found, searched ${ago(savedAt[a.pincode])}${
+                              (confirmedAt[a.pincode] ?? 0) > (savedAt[a.pincode] ?? 0) + 60_000 ? `, statuses updated ${ago(confirmedAt[a.pincode])}` : ''
+                            }`
                           : ''}
                   </span>
                   {failed[a.pincode] && <span className="text-xs text-bad">{failed[a.pincode]}</span>}
@@ -568,8 +574,10 @@ function AreaPanel({ areas }: { areas: AreaWithDistrict[] }) {
         <div className="flex flex-col gap-2 rounded-xl border border-line px-3 py-2">
           <p className="text-sm text-muted">
             {plural(savedPins.length)} saved on this page (oldest searched {ago(oldest ?? undefined)}). Saved until you close this page, up to 1 day: no map
-            searches used. Statuses on the cards are from when the area was searched.
+            searches used. Clozest signups and the team's lead statuses update by themselves about every 30 seconds while you're on
+            this screen. Search again only for businesses that are new or closed, or a changed phone number.
           </p>
+          <LiveStatus />
           {confirmClear ? (
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Clear saved results?">
               <span className="text-sm">Clear {plural(savedPins.length)}? Seeing them again uses map searches.</span>

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
 import { ApiError } from './errors'
-import type { Lead, LeadAreas, LeadDistrict, LeadDue, LeadEvent, LeadFunnel, LeadIn, LeadScan, LeadUsage, PlaceKind } from './types'
+import type { Lead, LeadAreas, LeadAreaStatus, LeadChanges, LeadDistrict, LeadDue, LeadEvent, LeadFunnel, LeadIn, LeadScan, LeadSeen, LeadUsage, PlaceKind } from './types'
 
 const L = '/api/v1/admin/leads'
 
@@ -15,6 +15,11 @@ export const leadsApi = {
     api<LeadAreas>('GET', `${L}/areas?${new URLSearchParams({ kind, district, state })}`),
   /** Searches one area live on the map (paid Mapbox requests: only on a press, never prefetched). */
   scan: (pincode: string, signal?: AbortSignal) => api<LeadScan>('POST', `${L}/scan/${encodeURIComponent(pincode)}`, { signal }),
+  /** Which searched areas changed since each one's time (our own data: no map search). */
+  changes: (areas: { pincode: string; since: string }[], signal?: AbortSignal) => api<LeadChanges>('POST', `${L}/changes`, { body: { areas }, signal }),
+  /** One searched area's leads and Clozest salons now, for the businesses shown there (no map search). */
+  refresh: (pincode: string, shops: LeadSeen[], signal?: AbortSignal) =>
+    api<LeadAreaStatus>('POST', `${L}/refresh/${encodeURIComponent(pincode)}`, { body: { shops }, signal }),
   save: (mapboxId: string, body: LeadIn) => api<Lead>('PUT', `${L}/${encodeURIComponent(mapboxId)}`, { body }),
   history: (mapboxId: string) => api<LeadEvent[]>('GET', `${L}/${encodeURIComponent(mapboxId)}/history`),
   due: (everyone: boolean) => api<LeadDue[]>('GET', `${L}/due${everyone ? '?everyone=true' : ''}`),

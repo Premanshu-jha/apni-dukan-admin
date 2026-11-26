@@ -879,6 +879,10 @@ export interface LeadShop {
   hours: { days: number; opens: string; closes: string; late: boolean } | null
   lead: Lead | null
   clozest: LeadClozest | null
+  /** Proof that `phone` is this business's own: sent back when bringing the area up to date. Null without a mobile. */
+  matchKey?: string | null
+  /** Added to the area by an update while the page was open (a lead a teammate saved): not from this search. */
+  addedLive?: boolean
 }
 
 export interface LeadSalon {
@@ -906,6 +910,40 @@ export interface LeadScan {
   partial: boolean
   capReached: boolean
   usage: LeadUsage
+  /**
+   * Up to when this answer is current (the server's time, a little before it answered): the next check for changes
+   * asks from here. Missing on areas saved before checks existed.
+   */
+  asOf?: string
+}
+
+/** Which searched areas changed (a lead saved or signed up, a Clozest salon registered or changed): POST /changes. */
+export interface LeadChanges {
+  /** The next `since` for every area not listed. */
+  asOf: string
+  areas: { pincode: string; changedAt: string }[]
+}
+
+/** A business the page shows, sent to bring its area up to date. */
+export interface LeadSeen {
+  mapboxId: string
+  name: string
+  latitude: number | null
+  longitude: number | null
+  phone: string | null
+  /** The scan's key for `phone`: without it the phone isn't used for matching. */
+  matchKey: string | null
+}
+
+/** One area as it is now (POST /refresh/{pincode}): no map search. */
+export interface LeadAreaStatus {
+  pincode: string
+  /** Each business sent: its lead and Clozest salon now. */
+  shops: { mapboxId: string; lead: Lead | null; clozest: LeadClozest | null }[]
+  /** Contacted leads there the page didn't send (a teammate's), as a scan lists them. */
+  saved: LeadShop[]
+  clozestOnly: LeadSalon[]
+  asOf: string
 }
 
 export interface LeadIn {

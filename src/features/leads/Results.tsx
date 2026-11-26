@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { dateOnly } from '../../lib/time'
 import { Link } from 'react-router'
 import type { LeadKind, LeadShop, LeadStatus, ShopStatus } from '../../api/types'
@@ -7,6 +7,7 @@ import { Banner, Button, Card, EmptyState, Loading, Pill } from '../../component
 import { STATUS_LABELS } from '../../lib/labels'
 import type { AreaWithDistrict } from './AreasTab'
 import { LeadSheet } from './LeadSheet'
+import { LiveStatus } from './LiveStatus'
 import {
   areaRows,
   copyText,
@@ -17,6 +18,7 @@ import {
   KIND_LABELS,
   kindCounts,
   LEAD_STATUS_LABELS,
+  NO_FILTERS,
   PRIORITY_LABELS,
   rowsOf,
   summarize,
@@ -26,6 +28,12 @@ import {
 import { useLeads } from './store'
 
 const PAGE = 50
+
+/** The lead of this business as the list shows it now (an update may have changed it while its sheet is open). */
+function liveLeadOf(rows: Row[], mapboxId: string) {
+  for (const r of rows) if (r.type === 'shop' && r.shop.mapboxId === mapboxId) return r.shop.lead
+  return null
+}
 const selectClass = 'min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base text-ink'
 
 /** The searched areas' businesses: numbers, the areas compared, a map and the list to work through. */
@@ -40,6 +48,19 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
   const [shownCount, setShownCount] = useState(PAGE)
   const [editing, setEditing] = useState<LeadShop | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  /**
+   * The rows shown with these filters: a business an update takes out of them (it signed up, a teammate called it)
+   * stays on screen, marked, until the filters change, so nothing jumps away under the user's thumb.
+   */
+  const shownWith = useRef<{ filters: string; keys: Set<string> }>({ filters: '', keys: new Set() })
+  // A new search of an area (its searched time changes) starts afresh too
+  const savedAtMap = useLeads((s) => s.savedAt)
+  const filtersKey = JSON.stringify(filters) + JSON.stringify(savedAtMap)
+
+  const shownRowKeys = useRef<string[]>([])
+  useEffect(() => {
+    shownWith.current = { filters: filtersKey, keys: new Set(shownRowKeys.current) }
+  })
 
   // Only areas of the districts still picked
   const known = new Set(areas.map((a) => a.pincode))
@@ -54,7 +75,14 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
     )
   }
   const rows = rowsOf(scans)
-  const filtered = filterRows(rows, filters, me.userId)
+  const matching = filterRows(rows, filters, me.userId)
+  const kept = shownWith.current.filters === filtersKey ? shownWith.current.keys : new Set<string>()
+  const matchingKeys = new Set(matching.map((r) => r.key))
+  const left = rows.filter((r) => kept.has(r.key) && !matchingKeys.has(r.key))
+  const changedOut = new Set(left.map((r) => r.key))
+  // In the list's order: what matches and what an update took out of it
+  const filtered = left.length ? filterRows(rows, { ...NO_FILTERS, sort: filters.sort }, me.userId).filter((r) => matchingKeys.has(r.key) || changedOut.has(r.key)) : matching
+  shownRowKeys.current = filtered.map((r) => r.key)
   const sum = summarize(rows)
   const places = Object.fromEntries(scans.map((s) => [s.pincode, s.places]))
   const partial = scans.filter((s) => s.partial)
@@ -174,12 +202,14 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted" aria-live="polite">
-            {count(filtered.length)} of {count(rows.length)} shown
+            {count(matching.length)} of {count(rows.length)} shown
+            {left.length > 0 && ` · ${count(left.length)} changed and no longer match: kept until you change a filter`}
           </p>
           <Button variant="secondary" className="min-h-11" onClick={() => void copy()} disabled={!filtered.length}>
             Copy shown rows
           </Button>
         </div>
+        <LiveStatus />
         {copied && <Banner>{copied}</Banner>}
 
         {filtered.length === 0 ? (
@@ -187,7 +217,12 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
         ) : (
           <ul className="flex flex-col gap-2" aria-label="Businesses">
             {filtered.slice(0, shownCount).map((r) => (
-              <li key={r.key}>{r.type === 'shop' ? <ShopCard shop={r.shop} places={places[r.area] ?? ''} onUpdate={() => setEditing(r.shop)} /> : <SalonCard row={r} />}</li>
+              <li key={r.key}>
+                {changedOut.has(r.key) && (
+                  <p className="px-1 pb-1 text-xs font-semibold text-warn">Changed: no longer matches your filters</p>
+                )}
+                {r.type === 'shop' ? <ShopCard shop={r.shop} places={places[r.area] ?? ''} onUpdate={() => setEditing(r.shop)} /> : <SalonCard row={r} />}
+              </li>
             ))}
           </ul>
         )}
@@ -209,6 +244,7 @@ export function Results({ areas }: { areas: AreaWithDistrict[] }) {
           shop={editing}
           title={editing.name}
           lead={editing.lead}
+          liveLead={liveLeadOf(rows, editing.mapboxId)}
           onClose={() => setEditing(null)}
           onSaved={(lead) => leadSaved(editing.mapboxId, lead)}
         />
@@ -343,11 +379,12 @@ function ShopCard({ shop, places, onUpdate }: { shop: LeadShop; places: string; 
         </Pill>
         {shop.clozest && <Pill tone="brand">Clozest: {STATUS_LABELS[shop.clozest.status]}</Pill>}
         {lead?.signedUpAt && <Pill tone="good">Signed up from this lead</Pill>}
+        {shop.addedLive && <Pill tone="muted">New from the team</Pill>}
       </div>
       <p className="text-sm text-muted">
         <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full" style={{ background: KIND_COLOURS[shop.kind] }} aria-hidden />
         {KIND_LABELS[shop.kind]} · {shop.pincode} {places.split(', ')[0]}
-        {!shop.onMapbox && ' · saved by the team (not on the map now)'}
+        {shop.addedLive ? ' · added by a teammate while this page was open' : !shop.onMapbox && ' · saved by the team (not on the map now)'}
       </p>
       {shop.address && <p className="text-sm [overflow-wrap:anywhere]">{shop.address}</p>}
       {hours && <p className="text-sm text-muted">{hours}</p>}
