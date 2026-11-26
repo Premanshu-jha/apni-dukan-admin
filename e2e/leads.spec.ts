@@ -28,10 +28,10 @@ function kukatpally(api: MockApi) {
 
 async function pickDistrict(page: import('@playwright/test').Page, typed: string, pick: RegExp) {
   await page.getByLabel('City or district').fill(typed)
-  await page.getByRole('listbox', { name: 'Matching districts' }).getByRole('button', { name: pick }).click()
+  await page.getByRole('listbox', { name: 'Matching places' }).getByRole('button', { name: pick }).click()
 }
 
-test('a field agent finds a district by an area name, narrows to areas with the search, searches them and works a lead', async ({ page, context, api }) => {
+test('a field agent finds their city by an area name, narrows to areas with the search, searches them and works a lead', async ({ page, context, api }) => {
   kukatpally(api)
   await signedIn(context, api, 'ADMIN')
   await page.goto('/')
@@ -41,15 +41,17 @@ test('a field agent finds a district by an area name, narrows to areas with the 
   await expect(page.getByRole('heading', { name: 'Leads' })).toBeVisible()
   await expect(page.getByText('Start with a city or district')).toBeVisible()
 
-  await pickDistrict(page, 'kukat', /Medchal Malkajgiri, Telangana.*Has Kukatpally \(500072\)/)
-  await expect(page.getByRole('list', { name: 'Districts picked' })).toContainText('Medchal Malkajgiri, Telangana')
+  // Kukatpally is filed by India Post under Medchal Malkajgiri: it is offered as Hyderabad, the city
+  await pickDistrict(page, 'kukat', /Kukatpally \(500072\) · Hyderabad/)
+  await expect(page.getByRole('list', { name: 'Places picked' })).toContainText('Hyderabad (city), Telangana')
   const areas = page.getByRole('list', { name: 'Areas', exact: true })
   // Found by Kukatpally: that area is in the area search already, ticked
   await expect(page.getByRole('list', { name: 'Areas searched for' }).getByRole('listitem')).toHaveCount(1)
   await expect(areas.getByRole('listitem')).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Search 1 area on the map' })).toBeVisible()
   await page.getByRole('button', { name: 'Clear search (show all areas)' }).click()
-  await expect(areas.getByRole('listitem')).toHaveCount(3)
+  // All areas of Hyderabad's three districts, each saying which one
+  await expect(areas.getByRole('listitem')).toHaveCount(6)
   await expect(areas.getByText('Yours')).toHaveCount(1)
 
   // The area search: chips narrow the list; clearing brings every area back
@@ -60,7 +62,7 @@ test('a field agent finds a district by an area name, narrows to areas with the 
   await expect(page.getByRole('list', { name: 'Areas searched for' }).getByRole('listitem')).toHaveCount(2)
   await expect(areas.getByRole('listitem')).toHaveCount(2)
   await page.getByRole('button', { name: 'Clear search (show all areas)' }).click()
-  await expect(areas.getByRole('listitem')).toHaveCount(3)
+  await expect(areas.getByRole('listitem')).toHaveCount(6)
   await page.getByRole('button', { name: /My areas \(1\)/ }).click()
   await expect(areas.getByRole('listitem')).toHaveCount(1)
 
@@ -172,8 +174,8 @@ test('a search that can’t run says why and what to do, and a busy server is wa
   await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
   // No key yet: the search stops and says who fixes it
   api.leads.scanError = { status: 503, code: 'MAPBOX_OFF', message: 'off' }
-  await page.getByRole('button', { name: /Tick all shown \(3\)/ }).click()
-  await page.getByRole('button', { name: 'Search 3 areas on the map' }).click()
+  await page.getByRole('button', { name: /Tick all shown \(4\)/ }).click()
+  await page.getByRole('button', { name: 'Search 4 areas on the map' }).click()
   await expect(page.getByText("Searching the map isn't set up yet. Ask a super admin to add the Mapbox key.")).toBeVisible()
   // Busy once for one area, not on the map for another: the busy one is tried again, the other is marked
   api.leads.scanError = null
@@ -279,15 +281,82 @@ test('after a conflict, what you did not change follows what was saved meanwhile
   expect(api.leads.saved.get('mb-tia')).toMatchObject({ status: 'CALLED', assignedTo: 'u-sita', note: 'Owner prefers mornings', version: 1 })
 })
 
-test('Greater Hyderabad: its other districts are one tap away', async ({ page, context, api }) => {
-  api.leads.districts.push({ district: 'Ranga Reddy', state: 'Telangana', areas: [{ pincode: '500032', places: 'Gachibowli' }] })
+test('one search finds any place in India: a city with all its districts, any pincode, a district, a name only the map knows', async ({ page, context, api }) => {
   await signedIn(context, api, 'ADMIN')
   await page.goto('/leads')
-  await pickDistrict(page, 'hyder', /Hyderabad, Telangana/)
-  await page.getByRole('button', { name: '+ Ranga Reddy' }).click()
-  await expect(page.getByRole('list', { name: 'Districts picked' })).toContainText('Ranga Reddy, Telangana')
-  await expect(page.getByRole('button', { name: '+ Ranga Reddy' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '+ Medchal Malkajgiri' })).toBeVisible()
+  const options = page.getByRole('listbox', { name: 'Matching places' })
+  // "Hyderabad" is the city first: its three districts, one tap
+  await page.getByLabel('City or district').fill('hyder')
+  await expect(options.getByRole('button').first()).toContainText('City · Hyderabad, Medchal Malkajgiri, Ranga Reddy · 6 areas')
+  await options.getByRole('button').first().click()
+  const areas = page.getByRole('list', { name: 'Areas', exact: true })
+  await expect(areas.getByRole('listitem')).toHaveCount(6)
+  await expect(areas.getByRole('listitem').filter({ hasText: '500087' })).toContainText('Medchal Malkajgiri')
+  await expect(areas.getByRole('listitem').filter({ hasText: '500032' })).toContainText('Ranga Reddy')
+
+  // A district elsewhere, by name
+  await pickDistrict(page, 'sahar', /^Saharsa, Bihar/)
+  await expect(page.getByRole('list', { name: 'Places picked' })).toContainText('Saharsa, Bihar')
+  await page.getByRole('button', { name: 'Remove Hyderabad' }).click()
+
+  // A pincode not in the places picked: the area search looks across India; tapping it shows its city, that area ticked
+  await page.getByLabel('Search areas').fill('500087')
+  const matching = page.getByRole('listbox', { name: 'Matching areas' })
+  await expect(matching.getByText('Not in the places picked. Elsewhere in India:')).toBeVisible()
+  await matching.getByRole('button', { name: /500087 · JJ Nagar Colony, Jawahar Nagar · Hyderabad/ }).click()
+  await expect(page.getByRole('list', { name: 'Places picked' })).toContainText('Hyderabad (city), Telangana')
+  await expect(page.getByRole('list', { name: 'Areas searched for' })).toContainText('500087')
+  await expect(page.getByRole('button', { name: 'Search 1 area on the map' })).toBeVisible()
+
+  // A name our list doesn't have: looked up on the map (one map search), offered as its city with that area
+  const lookups = () => api.calls.filter((c) => c.path.includes('/admin/leads/places')).length
+  await page.getByLabel('City or district').fill('yapral')
+  await expect(options.getByText('Found on the map (used 1 map search):')).toBeVisible()
+  await expect(options.getByRole('button', { name: /Yapral \(500087\) · Hyderabad/ })).toBeVisible()
+  expect(lookups()).toBe(1)
+  // Enter picks the first map result too
+  await page.getByLabel('City or district').press('Enter')
+  await expect(page.getByRole('list', { name: 'Areas searched for' })).toContainText('500087')
+  // Nothing anywhere: said plainly
+  await page.getByLabel('City or district').fill('zzqx')
+  await expect(options.getByText('Nothing in India matches "zzqx". Check the spelling, or try the pincode.')).toBeVisible()
+  // A whole pincode in the city box: just that area
+  await page.getByLabel('City or district').fill('852201')
+  await expect(options.getByRole('button')).toHaveCount(1)
+  await expect(options.getByRole('button')).toContainText('852201 · Saharsa, Saharsa Bazar · Saharsa')
+  await expect(options.getByRole('button')).toContainText('Opens Saharsa with this area ticked')
+})
+
+test('a city replaces its districts, a removed place keeps what another still lists, and a look-alike can be looked up on the map', async ({ page, context, api }) => {
+  api.leads.onMapPlaces['saharsa'] = [{ name: 'Saharsa', pincode: '852201' }]
+  await signedIn(context, api, 'ADMIN')
+  await page.goto('/leads')
+  const picked = page.getByRole('list', { name: 'Places picked' })
+  await pickDistrict(page, 'medchal', /Medchal Malkajgiri/)
+  await page.getByRole('list', { name: 'Areas', exact: true }).getByText('500072').click()
+  // Hyderabad the city covers Medchal Malkajgiri: its chip goes, the tick stays
+  await page.getByLabel('City or district').fill('hyder')
+  await expect(page.getByRole('listbox', { name: 'Matching places' }).getByText('District only · Telangana · 1 areas')).toBeVisible()
+  await page.getByRole('listbox', { name: 'Matching places' }).getByRole('button').first().click()
+  await expect(picked.getByRole('listitem')).toHaveCount(1)
+  await expect(picked).toContainText('Hyderabad (city)')
+  await expect(page.getByRole('button', { name: 'Search 1 area on the map' })).toBeVisible()
+
+  // A one-letter area search says what to type (no endless spinner)
+  await page.getByLabel('Search areas').fill('9')
+  await expect(page.getByText('Type 2 or more letters or digits.')).toBeVisible()
+  await page.getByLabel('Search areas').fill('')
+
+  // Our list has a match, but maybe not the one meant: a look-up on the map only when asked, said what it costs
+  const lookups = () => api.calls.filter((c) => c.path.includes('/admin/leads/places')).length
+  await page.getByLabel('City or district').fill('saharsa')
+  const options = page.getByRole('listbox', { name: 'Matching places' })
+  await expect(options.getByRole('button', { name: /^Saharsa, Bihar/ })).toBeVisible()
+  expect(lookups()).toBe(0)
+  await options.getByRole('button', { name: 'Not the one? Look up "saharsa" on the map (uses 1 map search)' }).click()
+  await expect(options.getByText('Found on the map (used 1 map search):')).toBeVisible()
+  await expect(options.getByRole('button', { name: /Saharsa \(852201\) · Saharsa/ })).toBeVisible()
+  expect(lookups()).toBe(1)
 })
 
 test('searched areas are saved on the page: a reload or another page shows them without searching the map again', async ({ page, context, api }) => {
